@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # PWS V1
 
 ## Project status
@@ -43,3 +44,7 @@ This project is currently in the planning and audit phase. Application implement
 
 ## Important note
 The approved Figma section is not currently accessible from this environment. Design review is therefore blocked pending access to the public/shared design or exported screens.
+=======
+# Finance_App
+This app is related to Personal Finance Management.
+>>>>>>> 9de1ff0825c94cbafae0c6e86c33bf9cb54d6d0c
