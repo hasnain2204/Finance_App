@@ -494,23 +494,37 @@ textarea { resize: vertical; min-height: 82px; }
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 8px 6px 12px;
 }
 
 .nav-item {
+  min-width: 0;
+  min-height: 52px;
   border: 0;
   background: transparent;
   color: var(--muted);
-  border-radius: 12px;
-  padding: 10px 6px;
+  border-radius: 0;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
+}
+
+.nav-icon {
+  height: 20px;
+  display: grid;
+  place-items: center;
 }
 
 .nav-item.active {
-  background: rgba(45, 109, 246, 0.08);
-  color: var(--primary);
+  background: transparent;
+  color: var(--primary-strong);
   font-weight: 700;
 }
 
@@ -528,6 +542,11 @@ textarea { resize: vertical; min-height: 82px; }
   .summary-grid { grid-template-columns: 1fr; }
   .topbar { align-items: flex-start; }
   .primary-action { padding: 10px 12px; }
+}
+
+.hero-add-button {
+  width: 100%;
+  margin-top: 12px;
 }
 
 /* Mobile finance app theme */
@@ -582,8 +601,10 @@ h2 { letter-spacing: 0; }
 
 .hero-panel {
   border-radius: 16px;
-  background: linear-gradient(135deg, #285bd8 0%, #4f84f8 100%);
-  box-shadow: 0 14px 28px rgba(47, 102, 246, 0.18);
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: var(--shadow);
 }
 
 .summary-card, .panel {
@@ -611,12 +632,35 @@ input:focus, select:focus, textarea:focus {
 
 .bottom-nav {
   width: min(440px, 100%);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top-color: var(--border);
   background: rgba(255, 255, 255, 0.96);
   padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 
 .nav-item { border-radius: 8px; }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.more-button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.more-button.active {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
 
 .icon-badge {
   border-radius: 8px;

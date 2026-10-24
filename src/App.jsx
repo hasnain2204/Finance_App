@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
+  ArrowLeftRight,
   ArrowUpRight,
+  ChartNoAxesCombined,
   Download,
+  Ellipsis,
+  House,
   PiggyBank,
   Plus,
   ShieldCheck,
@@ -33,7 +37,7 @@ const initialForm = {
   notes: ''
 };
 
-const navItems = ['home', 'transactions', 'analytics', 'budget', 'more'];
+const navItems = ['home', 'transactions', 'analytics', 'budget'];
 
 function App() {
   const [tab, setTab] = useState('home');
@@ -283,13 +287,16 @@ function App() {
         <div className="quick-metrics">
           <div>
             <span>Income</span>
-            <strong>{formatCurrency(summary.income)}</strong>
+            <strong className="income">{formatCurrency(summary.income)}</strong>
           </div>
           <div>
             <span>Expense</span>
-            <strong>{formatCurrency(summary.expense)}</strong>
+            <strong className="expense">{formatCurrency(summary.expense)}</strong>
           </div>
         </div>
+        <button type="button" className="primary-action full hero-add-button" onClick={() => setTab('transactions')}>
+          <Plus size={18} /> Add
+        </button>
       </section>
 
       <section className="summary-grid">
@@ -706,9 +713,17 @@ function App() {
           <p className="eyebrow">Good morning</p>
           <h1>PWS V1</h1>
         </div>
-        <button type="button" className="primary-action" onClick={() => setTab('transactions')}>
-          <Plus size={18} /> Add
-        </button>
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className={tab === 'more' ? 'more-button active' : 'more-button'}
+            onClick={() => setTab('more')}
+            aria-label="More options"
+            title="More"
+          >
+            <Ellipsis size={22} />
+          </button>
+        </div>
       </header>
 
       <main className="content">
@@ -727,7 +742,13 @@ function App() {
             className={tab === name ? 'nav-item active' : 'nav-item'}
             onClick={() => setTab(name)}
           >
-            {name === 'home' ? 'Home' : name === 'transactions' ? 'Transactions' : name === 'analytics' ? 'Analytics' : name === 'budget' ? 'Budget' : 'More'}
+            <span className="nav-icon" aria-hidden="true">
+              {name === 'home' && <House size={20} strokeWidth={1.9} />}
+              {name === 'transactions' && <ArrowLeftRight size={20} strokeWidth={1.9} />}
+              {name === 'analytics' && <ChartNoAxesCombined size={20} strokeWidth={1.9} />}
+              {name === 'budget' && <WalletCards size={20} strokeWidth={1.9} />}
+            </span>
+            <span>{name === 'home' ? 'Home' : name === 'transactions' ? 'Transactions' : name === 'analytics' ? 'Analytics' : 'Budget'}</span>
           </button>
         ))}
       </nav>
