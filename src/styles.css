@@ -11,12 +11,12 @@
   --primary: #2025c2;
   --primary-strong: #1424d3;
   --primary-soft: rgba(45, 109, 246, 0.12);
-  --bg: #f4f8ff;
-  --surface: rgba(255, 255, 255, 0.9);
+  --bg: #f9fbff;
+  --surface: rgb(235, 235, 235);
   --surface-strong: #ffffff;
   --text: #282f3a;
   --muted: #777d85;
-  --border: rgba(150, 157, 168, 0.25);
+  --border: rgba(150, 157, 168, 0.5);
   --income: #30a316;
   --expense: #d02222;
   --shadow: 0 18px 40px rgba(21, 23, 30, 0.05);
@@ -102,36 +102,35 @@ h2 { font-size: 18px; line-height: 1.4; }
 .mini-pill {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.18);
-  padding: 6px 10px;
+  border-radius: var(--s-radius-border);
+  background: var(--bg);
+  padding: 4px 8px;
   font-size: 11px;
   font-weight: 700;
 }
 
 .hero-amount {
   font-size: clamp(2rem, 6vw, 2.8rem);
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -0.04em;
   margin-bottom: 18px;
 }
 
 .quick-metrics {
-  gap: 12px;
+  gap: 8px;
 }
 
-.quick-metrics div {
+.quick-metrics div{
   flex: 1;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 14px;
+  border: 1px solid var(--border);
+  /* background: rgb(247, 247, 247); */
+  border-radius: var(--m-radius-border);
   padding: 12px 14px;
 }
 
 .quick-metrics span {
   display: block;
-  font-size: 11px;
-  opacity: 0.85;
+  font-size: 12px;
   text-transform: uppercase;
   margin-bottom: 6px;
 }
@@ -149,7 +148,7 @@ h2 { font-size: 18px; line-height: 1.4; }
 .summary-card, .panel {
   background: rgba(255,255,255,0.9);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: var(--m-radius-border);
   box-shadow: var(--shadow);
 }
 
@@ -206,15 +205,14 @@ h2 { font-size: 18px; line-height: 1.4; }
   justify-content: center;
   gap: 8px;
   border: 0;
-  border-radius: 12px;
-  padding: 11px 16px;
-  font-weight: 700;
+  border-radius: var(--m-radius-border);
+  padding: 12px 16px;
+  font-weight: 600;
 }
 
 .primary-action {
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
-  color: white;
-  box-shadow: 0 12px 22px rgba(37, 99, 235, 0.2);
+  color: var(--surface-strong);
 }
 
 .primary-action.full { width: 100%; }
@@ -586,18 +584,6 @@ html, body, #root {
 h1 { letter-spacing: 0; }
 h2 { letter-spacing: 0; }
 
-.primary-action {
-  min-height: 44px;
-  border-radius: 10px;
-  background: var(--primary);
-  box-shadow: 0 7px 16px rgba(47, 102, 246, 0.16);
-}
-
-.secondary-button {
-  min-height: 42px;
-  border-radius: 10px;
-  background: var(--primary-soft);
-}
 
 .hero-panel {
   border-radius: 16px;

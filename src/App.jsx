@@ -295,7 +295,7 @@ function App() {
           </div>
         </div>
         <button type="button" className="primary-action full hero-add-button" onClick={() => setTab('transactions')}>
-          <Plus size={18} /> Add
+          <Plus size={16} /> Add Transaction
         </button>
       </section>
 
