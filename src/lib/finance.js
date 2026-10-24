@@ -6,10 +6,18 @@ export function fromPaisa(value) {
   return Number((Number(value || 0) / 100).toFixed(2));
 }
 
+export function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
 export function formatCurrency(value) {
   const numericValue = Number(value || 0);
   const formatted = new Intl.NumberFormat('en-PK', {
-    maximumFractionDigits: 0
+    maximumFractionDigits: 2
   }).format(numericValue);
 
   return `PKR ${formatted}`;
@@ -31,7 +39,7 @@ export function calculateBalance(transactions = []) {
   };
 }
 
-export function calculateMonthlySummary(transactions = [], month = new Date().toISOString().slice(0, 7)) {
+export function calculateMonthlySummary(transactions = [], month = getLocalDateString().slice(0, 7)) {
   const monthTransactions = transactions.filter((tx) => {
     if (!tx.date) return false;
     return tx.date.startsWith(month);
@@ -42,10 +50,22 @@ export function calculateMonthlySummary(transactions = [], month = new Date().to
 
 export function validateTransaction(formValues) {
   const amount = Number(formValues.amount || 0);
+  const date = String(formValues.date || '');
   const errors = [];
 
-  if (!Number.isFinite(amount) || amount <= 0) {
-    errors.push('Amount must be greater than zero.');
+  if (!Number.isFinite(amount) || amount < 0.01 || !Number.isSafeInteger(toPaisa(amount))) {
+    errors.push('Amount must be at least PKR 0.01 and within the supported range.');
+  }
+
+  const parsedDate = new Date(`${date}T00:00:00`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    Number.isNaN(parsedDate.getTime()) ||
+    parsedDate.getFullYear() !== Number(date.slice(0, 4)) ||
+    parsedDate.getMonth() + 1 !== Number(date.slice(5, 7)) ||
+    parsedDate.getDate() !== Number(date.slice(8, 10))
+  ) {
+    errors.push('Select a valid transaction date.');
   }
 
   return {

@@ -22,4 +22,5 @@
 
 ## Current status
 - Stack approval is confirmed from product requirements.
-- Actual project scaffold has not yet been initialized at the code level.
+- A React/Vite implementation and PWA build configuration are present.
+- Dexie is used for local persistence; installation and offline behavior still require validation.

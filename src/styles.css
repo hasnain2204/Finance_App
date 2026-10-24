@@ -1,37 +1,34 @@
 :root {
-  font-family: Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+  font-family: Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   line-height: 1.25;
-  /* font-weight: 400; */
-  color: #152033;
-  background: #f4f7ff;
+  color: #1b2940;
+  background: #f7f9fc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --primary: #2025c2;
-  --primary-strong: #1424d3;
-  --primary-soft: rgba(45, 109, 246, 0.12);
-  --bg: #f9fbff;
-  --surface: rgb(235, 235, 235);
+  --primary: #2f66f6;
+  --primary-strong: #2458e8;
+  --primary-soft: rgba(47, 102, 246, 0.09);
+  --bg: #f7f9fc;
+  --surface: #ffffff;
   --surface-strong: #ffffff;
-  --text: #282f3a;
-  --muted: #777d85;
-  --border: rgba(150, 157, 168, 0.5);
+  --text: #1b2940;
+  --muted: #697b98;
+  --border: #e4eaf2;
   --income: #30a316;
   --expense: #d02222;
-  --shadow: 0 18px 40px rgba(21, 23, 30, 0.05);
+  --shadow: 0 4px 12px rgba(28, 45, 78, 0.025);
   --s-radius-border: 4px;
   --m-radius-border: 8px;
-  --l-radius-border: 16px
+  --l-radius-border: 16px;
 }
 
 * { box-sizing: border-box; }
 html, body, #root {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(circle at top, rgba(45, 109, 246, 0.10), transparent 20%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
 }
 body { min-height: 100vh; }
@@ -41,16 +38,16 @@ button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 
 .app-shell {
+  width: 100%;
   max-width: 440px;
   margin: 0 auto;
   min-height: 100vh;
   background: transparent;
-  padding: 20px 16px 98px;
+  padding: 14px 16px 96px;
 }
 
 .topbar,
 .panel-header,
-.budget-row,
 .transaction-item,
 .inline-form,
 .hero-topline,
@@ -61,8 +58,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 .topbar {
-  margin-bottom: 18px;
-  padding: 10px 4px 0;
+  min-height: 58px;
+  margin-bottom: 14px;
+  padding: 6px 0 0;
 }
 
 .eyebrow {
@@ -120,14 +118,11 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
 }
 
 .panel {
+  padding: 16px;
   background: rgba(255,255,255,0.9);
   border: 1px solid var(--border);
   border-radius: var(--m-radius-border);
   box-shadow: var(--shadow);
-}
-
-.panel {
-  padding: 16px;
 }
 
 .primary-action, .secondary-button {
@@ -165,24 +160,31 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
 
 .chart-bars {
   display: flex;
-  align-items: end;
+  align-items: stretch;
   gap: 10px;
-  min-height: 148px;
+  height: 148px;
   padding-top: 18px;
 }
 
 .bar-column {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: grid;
+  grid-template-rows: 12px minmax(0, 1fr) 12px;
   gap: 8px;
   min-width: 0;
+  height: 100%;
+  justify-items: center;
+}
+
+.bar-track {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
 }
 
 .bar {
   width: 100%;
-  min-height: 24px;
   border-radius: 5px 5px 0 0;
   background: var(--primary);
 }
@@ -198,7 +200,6 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
 }
 
 .transaction-list,
-.budget-list,
 .category-list,
 .stacked-blocks {
   display: grid;
@@ -243,7 +244,6 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
 
 .transaction-copy span,
 .transaction-meta span,
-.budget-row.muted,
 .metric-card span,
 .category-row span {
   color: var(--muted);
@@ -337,35 +337,6 @@ textarea { resize: vertical; min-height: 82px; }
 
 .metric-card.accent {
   background: rgba(45, 109, 246, 0.08);
-}
-
-.budget-item {
-  display: grid;
-  gap: 10px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.budget-item:last-child { border-bottom: 0; }
-
-.progress {
-  width: 100%;
-  height: 10px;
-  background: #e2e8f0;
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.progress span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #7aa5ff 0%, var(--primary) 100%);
-  border-radius: inherit;
-}
-
-.budget-input {
-  max-width: 120px;
-  text-align: right;
 }
 
 .inline-form {
@@ -473,39 +444,7 @@ textarea { resize: vertical; min-height: 82px; }
 }
 
 .hero-add-button {
-  width: 100%;
   margin-top: 12px;
-}
-
-/* Mobile finance app theme */
-:root {
-  --primary: #2f66f6;
-  --primary-strong: #2458e8;
-  --primary-soft: rgba(47, 102, 246, 0.09);
-  --bg: #f7f9fc;
-  --surface: #ffffff;
-  --surface-strong: #ffffff;
-  --text: #1b2940;
-  --muted: #697b98;
-  --border: #e4eaf2;
-  --shadow: 0 4px 12px rgba(28, 45, 78, 0.025);
-}
-
-html, body, #root {
-  background: var(--bg);
-}
-
-.app-shell {
-  width: 100%;
-  max-width: 440px;
-  min-height: 100vh;
-  padding: 14px 16px 96px;
-}
-
-.topbar {
-  min-height: 58px;
-  margin-bottom: 14px;
-  padding: 6px 0 0;
 }
 
 .topbar .eyebrow { display: none; }
@@ -536,12 +475,6 @@ h2 { letter-spacing: 0; }
   color: var(--text);
   box-shadow: var(--shadow);
   padding: 18px;
-}
-
-.panel {
-  border-radius: 8px;
-  border-color: var(--border);
-  box-shadow: var(--shadow);
 }
 
 input, select, textarea {
@@ -914,28 +847,29 @@ input:focus, select:focus, textarea:focus {
 }
 
 .transaction-type-control {
-  height: 58px;
+  height: 56px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 6px;
+  gap: 4px;
+  padding: 4px;
   margin-bottom: 24px;
   border-radius: 10px;
-  background: #f1f4f8;
+  background: var(--bg);
+  border: 1px solid var(--border);
 }
 
 .transaction-type-control button {
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--m-radius-border);
   background: transparent;
   color: var(--muted);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .transaction-type-control button.active {
   background: var(--surface-strong);
   color: var(--primary);
-  box-shadow: 0 4px 12px rgba(28, 45, 78, 0.08);
+  box-shadow: var(--m-shadow);
 }
 
 .transaction-form {

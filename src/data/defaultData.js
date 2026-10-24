@@ -18,9 +18,3 @@ export const defaultPaymentMethods = [
   { id: 'pm-jazzcash', name: 'JazzCash' },
   { id: 'pm-other', name: 'Other' }
 ];
-
-export const defaultBudgets = [
-  { id: 'budget-food', categoryId: 'cat-food', month: '2026-10', amount: 10000 },
-  { id: 'budget-transport', categoryId: 'cat-transport', month: '2026-10', amount: 5000 },
-  { id: 'budget-bills', categoryId: 'cat-bills', month: '2026-10', amount: 12000 }
-];

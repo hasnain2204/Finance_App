@@ -15,5 +15,6 @@ The V1 test plan covers local data flows, UI states, app usability, financial ca
 - Responsive mobile views
 
 ## Status
-- Test plan drafted
-- Execution blocked until project implementation begins and access to design is available
+- Finance utility tests are implemented and run in Vitest.
+- UI, IndexedDB persistence, restore validation, and offline/PWA behavior are not yet covered.
+- Design review remains blocked by Figma access; it is not a prerequisite for running code tests.

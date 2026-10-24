@@ -1,19 +1,20 @@
 # PWS V1 Roadmap
 
 ## Status
-- Phase 0: In progress
-- Phase 1: In progress
-- Phase 2: Not started
-- Application implementation: Not started
+- Phase 0: Partially complete; design access is still blocked
+- Phase 1: Specification drafted; design-dependent decisions remain open
+- Phase 2: Early implementation in progress
+- Application implementation: Functional prototype; not release-ready
 
 ## Current findings
-- Workspace contains only the agent instruction file and a blank HTML file; no initialized React/Vite app was detected.
-- The Figma section link returned HTTP 403 from this environment, so design inspection is currently limited by access restrictions.
-- A complete visual screen inventory cannot be confirmed until the design is accessible.
-- Design requirements and product scope remain subject to confirmation from the approved Figma section and user decisions.
+- A React/Vite PWA is implemented with local Dexie/IndexedDB storage and core transaction flows.
+- Dashboard and monthly-summary analytics are present, but budgets remain a placeholder and reporting is incomplete.
+- Category/payment-method management and JSON backup/restore are present; settings/support flows are not complete.
+- The Figma section link returned HTTP 403 from this environment, so visual parity and the full screen inventory remain unverified.
+- Automated tests currently cover finance utilities only; UI, database, restore, and offline behavior lack coverage.
 
 ## Phase 0 — Workspace, requirements, and design audit
-Status: In progress
+Status: Partially complete
 
 ### Objectives
 - Verify workspace contents and project initialization state.
@@ -25,10 +26,9 @@ Status: In progress
 - Workspace state is verified.
 - Design access status is documented.
 - Missing data and blockers are explicitly listed.
-- No code generation has occurred before approval.
 
 ## Phase 1 — Project specification and architecture
-Status: In progress
+Status: Partially complete
 
 ### Objectives
 - Finalize the product scope and exclusions.
@@ -41,13 +41,27 @@ Status: In progress
 - Missing technical decisions are clearly identified.
 - Roadmap and documentation are prepared for approval.
 
+## Phase 2 — Core application implementation
+Status: Early implementation in progress
+
+### Implemented
+- Local persistence, first-run onboarding, dashboard, transaction CRUD, and monthly totals
+- Category/payment-method management and JSON backup/restore
+- PWA build configuration
+
+### Remaining
+- Implement or explicitly remove budget planning from V1 scope.
+- Complete weekly/monthly/category analytics, settings, and support requirements.
+- Add UI/database/backup/offline tests and verify install/offline behavior.
+- Review visual parity after Figma access is available.
+
 ## Dependency notes
-- Design access is a prerequisite for screen-by-screen implementation planning.
-- The React + JavaScript + Vite stack is the approved baseline, but actual project initialization has not yet occurred.
+- Design access is a prerequisite for visual parity review and final screen-by-screen scope confirmation.
+- The React + JavaScript + Vite stack is implemented as the current baseline.
 - Dexie.js + IndexedDB are approved for local-first storage.
 - Search, filter, and cloud sync remain excluded from V1.
 
 ## Next actions
 1. Obtain design access or exported frames for the approved Finance App MVP section.
-2. Confirm any missing product decisions or ambiguities.
-3. Approve the planning documents before implementation begins.
+2. Confirm whether budgets remain part of V1 and complete remaining settings/support/reporting flows.
+3. Add UI/database/restore tests and verify PWA install/offline behavior.

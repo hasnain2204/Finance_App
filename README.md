@@ -1,7 +1,21 @@
 # PWS V1
 
 ## Project status
-This project is currently in the planning and audit phase. Application implementation has not started yet.
+The project is an early functional prototype, not a complete V1 release.
+
+### Implemented
+- Local-first React/Vite PWA scaffold with Dexie/IndexedDB persistence
+- First-run onboarding and dashboard balance, income, expense, and weekly spending views
+- Income/expense entry, transaction history, detail, edit, and delete flows
+- Monthly totals, category/payment-method management, and JSON backup/restore
+
+### Incomplete or not yet verified
+- Budget planning is currently a placeholder.
+- Analytics are limited; weekly and category reporting are not complete.
+- Settings and support screens are not implemented beyond onboarding preferences.
+- Automated coverage is limited to finance utility tests; UI, persistence, backup/restore, and offline behavior need tests.
+- PWA build configuration exists, but installation and offline behavior have not been manually verified.
+- The approved Figma section remains inaccessible from this environment, so visual parity is unverified.
 
 ## Stack
 - React

@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { defaultCategories, defaultPaymentMethods, defaultBudgets } from '../data/defaultData';
+import { defaultCategories, defaultPaymentMethods } from '../data/defaultData';
 
 export const db = new Dexie('pws-v1-db');
 
@@ -14,18 +14,12 @@ db.version(1).stores({
 export async function seedDatabase() {
   const categoryCount = await db.categories.count();
   const paymentCount = await db.paymentMethods.count();
-  const budgetCount = await db.budgets.count();
-
   if (categoryCount === 0) {
     await db.categories.bulkPut(defaultCategories);
   }
 
   if (paymentCount === 0) {
     await db.paymentMethods.bulkPut(defaultPaymentMethods);
-  }
-
-  if (budgetCount === 0) {
-    await db.budgets.bulkPut(defaultBudgets);
   }
 
   const prefsCount = await db.preferences.count();
@@ -35,11 +29,10 @@ export async function seedDatabase() {
 }
 
 export async function resetDatabase() {
-  await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.budgets, db.preferences, async () => {
+  await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.preferences, async () => {
     await db.transactions.clear();
     await db.categories.clear();
     await db.paymentMethods.clear();
-    await db.budgets.clear();
     await db.preferences.clear();
   });
 
