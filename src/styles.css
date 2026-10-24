@@ -11,8 +11,9 @@
   --primary-strong: #2458e8;
   --primary-soft: rgba(47, 102, 246, 0.09);
   --bg: #f7f9fc;
-  --surface: #ffffff;
+  --surface: #f0f0f1;
   --surface-strong: #ffffff;
+  --default-color: #000000;
   --text: #1b2940;
   --muted: #697b98;
   --border: #e4eaf2;
@@ -118,18 +119,14 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
 }
 
 .panel {
-  padding: 16px;
-  background: rgba(255,255,255,0.9);
-  border: 1px solid var(--border);
-  border-radius: var(--m-radius-border);
-  box-shadow: var(--shadow);
+  padding: 0px 8px;
 }
 
 .primary-action, .secondary-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 16px;
   border: 0;
   border-radius: var(--m-radius-border);
   padding: 12px 16px;
@@ -141,14 +138,16 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
   color: var(--surface-strong);
 }
 
-.primary-action.full { width: 100%; }
+.primary-action.full {
+   width: 100%; }
 
 .secondary-button {
   background: rgba(45, 109, 246, 0.08);
   color: var(--primary);
 }
 
-.secondary-button.wide { width: 100%; }
+.secondary-button.wide { 
+  width:100%; }
 
 .link-button {
   border: 0;
@@ -199,28 +198,32 @@ h2 { font-size: 16px; line-height: 1.25; font-weight: 600; }
   color: var(--muted);
 }
 
-.transaction-list,
 .category-list,
 .stacked-blocks {
   display: grid;
-  gap: 12px;
+  gap: 32px;
 }
 
-.transaction-list { margin-top: 16px; }
-.transaction-list.compact { margin-top: 14px; }
+.transaction-list { 
+  margin-top: 16px; 
+}
+
+.transaction-list.compact {
+   margin-top: 16px; 
+}
 
 .transaction-item {
-  gap: 12px;
-  padding: 8px 0;
+  gap: 16px;
+  padding: 12px 4px;
   border-bottom: 1px solid var(--border);
 }
 
 .transaction-item:last-child { border-bottom: 0; }
 
 .transaction-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--m-radius-border);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -280,23 +283,24 @@ textarea { resize: vertical; min-height: 82px; }
 .segmented-control {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 18px;
+  padding: 4px;
+  border-radius: var(--m-radius-border);
+  background: var(--surface);
+  border: var(--border);
 }
 
 .seg-button {
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.8);
+  border: 0;
+  background: transparent;
   color: var(--muted);
-  border-radius: 10px;
-  padding: 10px 8px;
+  border-radius: var(--m-radius-border);
+  padding: 16px 8px;
+  font-weight: 500;
 }
 
 .seg-button.active {
-  border-color: rgba(45, 109, 246, 0.25);
-  background: rgba(45, 109, 246, 0.10);
-  color: var(--primary);
-  font-weight: 700;
+  background: var(--surface-strong);
+  color: var(--default-color);
 }
 
 .status {
@@ -854,8 +858,8 @@ input:focus, select:focus, textarea:focus {
   padding: 4px;
   margin-bottom: 24px;
   border-radius: 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--surface);
+  /* border: 1px solid var(--border); */
 }
 
 .transaction-type-control button {
@@ -864,6 +868,7 @@ input:focus, select:focus, textarea:focus {
   background: transparent;
   color: var(--muted);
   font-weight: 600;
+  font-size: 16px;
 }
 
 .transaction-type-control button.active {

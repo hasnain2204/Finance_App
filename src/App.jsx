@@ -3,6 +3,8 @@ import {
   ArrowDownLeft,
   ArrowLeft,
   ArrowLeftRight,
+  CalendarDays,
+  Clock3,
   ArrowUpRight,
   ChartNoAxesCombined,
   Download,
@@ -24,7 +26,6 @@ import {
   calculateMonthlySummary,
   formatCurrency,
   fromPaisa,
-  getLocalDateString,
   toPaisa,
   validateTransaction
 } from './lib/finance';
@@ -35,7 +36,7 @@ const initialForm = {
   type: 'expense',
   categoryId: defaultCategories.find((category) => category.name === 'Other')?.id || defaultCategories[0].id,
   paymentMethodId: defaultPaymentMethods.find((method) => method.name === 'Other')?.id || defaultPaymentMethods[0].id,
-  date: getLocalDateString(),
+  date: new Date().toISOString().slice(0, 10),
   notes: ''
 };
 
@@ -53,7 +54,7 @@ function App() {
   const [methodInput, setMethodInput] = useState('');
   const [preferences, setPreferences] = useState(null);
   const [onboardingName, setOnboardingName] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [editingTransactionId, setEditingTransactionId] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -71,18 +72,15 @@ function App() {
 
   const summary = useMemo(() => calculateBalance(transactions), [transactions]);
   const monthlySummary = useMemo(
-    () => calculateMonthlySummary(transactions, getLocalDateString().slice(0, 7)),
+    () => calculateMonthlySummary(transactions, new Date().toISOString().slice(0, 7)),
     [transactions]
   );
 
-  const sortedTransactions = useMemo(
-    () => [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)),
-    [transactions]
-  );
-  const filteredTransactions = useMemo(
-    () => sortedTransactions.filter((tx) => (view === 'all' ? true : tx.type === view)),
-    [sortedTransactions, view]
-  );
+  const filteredTransactions = useMemo(() => {
+    return [...transactions]
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .filter((tx) => (view === 'all' ? true : tx.type === view));
+  }, [transactions, view]);
 
   const weeklySpending = useMemo(() => {
     const days = Array.from({ length: 7 }, (_, index) => {
@@ -92,15 +90,14 @@ function App() {
     });
 
     return days.map((day) => {
-      const iso = getLocalDateString(day);
+      const iso = day.toISOString().slice(0, 10);
       const total = transactions
-        .filter((tx) => tx.type === 'expense' && tx.date?.startsWith(iso))
+        .filter((tx) => tx.type === 'expense' && tx.date.startsWith(iso))
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
       return { label: day.toLocaleDateString('en-PK', { weekday: 'short' }), value: total };
     });
   }, [transactions]);
-  const maxWeeklySpending = Math.max(...weeklySpending.map((day) => day.value), 0);
 
   const categoryTotals = useMemo(() => {
     const totals = {};
@@ -130,8 +127,6 @@ function App() {
       setPreferences(appPreferences || { id: 'app', currency: 'PKR', lightMode: true });
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -147,18 +142,11 @@ function App() {
     };
 
     setIsLoading(true);
-    setStatus({ type: 'idle', message: '' });
-    try {
-      await Promise.all([
-        db.preferences.put(nextPreferences),
-        new Promise((resolve) => window.setTimeout(resolve, 1150))
-      ]);
-      setPreferences(nextPreferences);
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Could not save your preferences. Please try again.' });
-    } finally {
-      setIsLoading(false);
-    }
+    await Promise.all([
+      db.preferences.put(nextPreferences),
+      new Promise((resolve) => window.setTimeout(resolve, 1150))
+    ]);
+    setPreferences(nextPreferences);
   };
 
   const handleInputChange = (event) => {
@@ -190,78 +178,59 @@ function App() {
       paymentMethodId: form.paymentMethodId,
       date: form.date,
       notes: form.notes.trim(),
-      createdAt: editingTransactionId
-        ? selectedTransaction?.createdAt || new Date().toISOString()
-        : new Date().toISOString()
+      createdAt: new Date().toISOString()
     };
 
-    try {
-      if (editingTransactionId) {
-        await db.transactions.update(editingTransactionId, nextPayload);
-      } else {
-        await db.transactions.add(nextPayload);
-      }
-
-      setForm({
-        ...initialForm,
-        categoryId: categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id,
-        paymentMethodId: paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id
-      });
-      setStatus({ type: 'idle', message: '' });
-      setEditingTransactionId(null);
-      setSelectedTransaction(null);
-      await loadData();
-      setTab('transactions');
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Could not save the transaction. Please try again.' });
+    if (editingTransactionId) {
+      await db.transactions.update(editingTransactionId, nextPayload);
+    } else {
+      await db.transactions.add(nextPayload);
     }
+    setForm({
+      ...initialForm,
+      categoryId: categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id,
+      paymentMethodId: paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id
+    });
+    setStatus({ type: 'idle', message: '' });
+    setEditingTransactionId(null);
+    setSelectedTransaction(null);
+    loadData();
+    setTab('transactions');
   };
 
   const handleDelete = async () => {
     if (!selectedTransaction?.id) return;
-    try {
-      await db.transactions.delete(selectedTransaction.id);
-      setShowDeleteConfirm(false);
-      setSelectedTransaction(null);
-      setStatus({ type: 'idle', message: '' });
-      await loadData();
-      setTab('transactions');
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Could not delete the transaction. Please try again.' });
-    }
+    await db.transactions.delete(selectedTransaction.id);
+    setShowDeleteConfirm(false);
+    setSelectedTransaction(null);
+    setStatus({ type: 'idle', message: '' });
+    await loadData();
+    setTab('transactions');
   };
 
   const handleAddCategory = async () => {
     const trimmed = categoryInput.trim();
     if (!trimmed) return;
 
-    try {
-      await db.categories.put({
-        id: `cat-${Date.now()}`,
-        name: trimmed,
-        type: 'expense'
-      });
-      setCategoryInput('');
-      await loadData();
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Could not add the category. Please try again.' });
-    }
+    await db.categories.put({
+      id: `cat-${Date.now()}`,
+      name: trimmed,
+      type: 'expense'
+    });
+    setCategoryInput('');
+    loadData();
   };
 
   const handleAddMethod = async () => {
     const trimmed = methodInput.trim();
     if (!trimmed) return;
 
-    try {
-      await db.paymentMethods.put({
-        id: `pm-${Date.now()}`,
-        name: trimmed
-      });
-      setMethodInput('');
-      await loadData();
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Could not add the payment method. Please try again.' });
-    }
+    await db.paymentMethods.put({
+      id: `pm-${Date.now()}`,
+      name: trimmed
+    });
+    setMethodInput('');
+    loadData();
   };
 
   const handleExport = () => {
@@ -276,12 +245,6 @@ function App() {
     setStatus({ type: 'success', message: 'Backup exported successfully.' });
   };
 
-  const renderStatus = () => status.message ? (
-    <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
-      {status.message}
-    </p>
-  ) : null;
-
   const handleRestore = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -289,66 +252,40 @@ function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (
-        !parsed ||
-        parsed.version !== 1 ||
-        !Array.isArray(parsed.transactions) ||
-        !Array.isArray(parsed.categories) ||
-        !Array.isArray(parsed.paymentMethods) ||
-        !parsed.categories.every((category) =>
-          category &&
-          typeof category.id === 'string' &&
-          typeof category.name === 'string' &&
-          category.name.trim() &&
-          ['income', 'expense'].includes(category.type)
-        ) ||
-        !parsed.paymentMethods.every((method) =>
-          method &&
-          typeof method.id === 'string' &&
-          typeof method.name === 'string' &&
-          method.name.trim()
-        )
-      ) {
+      if (!parsed || !Array.isArray(parsed.transactions)) {
         throw new Error('Invalid backup format');
       }
-
-      const categoryIds = new Set(parsed.categories.map((category) => category.id));
-      const paymentMethodIds = new Set(parsed.paymentMethods.map((method) => method.id));
-      const restoredTransactions = parsed.transactions.map((transaction) => {
-        if (
-          !transaction ||
-          !['income', 'expense'].includes(transaction.type) ||
-          typeof transaction.categoryId !== 'string' ||
-          !categoryIds.has(transaction.categoryId) ||
-          typeof transaction.paymentMethodId !== 'string' ||
-          !paymentMethodIds.has(transaction.paymentMethodId) ||
-          !validateTransaction(transaction).isValid
-        ) {
-          throw new Error('Invalid transaction in backup');
-        }
-
-        return {
-          ...transaction,
-          amount: toPaisa(Number(transaction.amount))
-        };
-      });
 
       await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, async () => {
         await db.transactions.clear();
         await db.categories.clear();
         await db.paymentMethods.clear();
-        await db.categories.bulkPut(parsed.categories);
-        await db.paymentMethods.bulkPut(parsed.paymentMethods);
-        await db.transactions.bulkPut(restoredTransactions);
+
+        if (Array.isArray(parsed.categories)) await db.categories.bulkPut(parsed.categories);
+        if (Array.isArray(parsed.paymentMethods)) await db.paymentMethods.bulkPut(parsed.paymentMethods);
+        if (Array.isArray(parsed.transactions)) {
+          await db.transactions.bulkPut(
+            parsed.transactions.map((tx) => ({
+              ...tx,
+              amount: toPaisa(Number(tx.amount || 0))
+            }))
+          );
+        }
       });
 
       setStatus({ type: 'success', message: 'Backup restored successfully.' });
-      await loadData();
+      setTimeout(() => loadData(), 200);
     } catch (error) {
       setStatus({ type: 'error', message: 'The selected file could not be restored.' });
     } finally {
       event.target.value = '';
     }
+  };
+
+  const openTransactionDetail = (transaction) => {
+    setSelectedTransaction(transaction);
+    setShowDeleteConfirm(false);
+    setTab('transaction-detail');
   };
 
   const renderHome = () => (
@@ -385,15 +322,11 @@ function App() {
 
         <div className="chart-bars" aria-label="Weekly spending chart">
           {weeklySpending.map((day) => {
+            const max = Math.max(...weeklySpending.map((item) => item.value), 1);
             return (
               <div key={day.label} className="bar-column">
-                <span className="bar-value">{day.value.toLocaleString('en-PK', { maximumFractionDigits: 2 })}</span>
-                <div className="bar-track">
-                  <span
-                    className="bar"
-                    style={{ height: `${maxWeeklySpending ? (day.value / maxWeeklySpending) * 100 : 0}%` }}
-                  />
-                </div>
+                <span className="bar-value">{Math.round(day.value).toLocaleString('en-PK')}</span>
+                <span className="bar" style={{ height: `${Math.max(18, (day.value / max) * 100)}%` }} />
                 <small>{day.label.slice(0, 3)}</small>
               </div>
             );
@@ -409,8 +342,14 @@ function App() {
         </div>
 
         <div className="transaction-list compact">
-          {sortedTransactions.slice(0, 4).map((tx) => (
-            <div key={tx.id} className="transaction-item">
+          {filteredTransactions.slice(0, 4).map((tx) => (
+            <button
+              key={tx.id}
+              type="button"
+              className="transaction-item transaction-row"
+              onClick={() => openTransactionDetail(tx)}
+              aria-label={`View ${tx.title} transaction`}
+            >
               <div className={`transaction-icon ${tx.type}`}>
                 {tx.type === 'income' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
               </div>
@@ -422,7 +361,7 @@ function App() {
                 <strong className={tx.type}>{tx.type === 'income' ? '+' : '-'}{formatCurrency(Number(tx.amount || 0))}</strong>
                 <span>{new Date(tx.date).toLocaleDateString('en-PK')}</span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </section>
@@ -452,7 +391,7 @@ function App() {
     <div className="stacked-blocks">
       <section className="panel">
         <div className="panel-header">
-          <h2>Transactions</h2>
+          {/* <h2>Transactions</h2> */}
         </div>
 
         <div className="segmented-control">
@@ -476,8 +415,9 @@ function App() {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">History</p>
-            <h2>Transaction list</h2>
+            <h2>Transaction list
+              {/* <p className="eyebrow"> History </p> */}
+            </h2>
           </div>
         </div>
 
@@ -490,11 +430,7 @@ function App() {
                 key={tx.id}
                 type="button"
                 className="transaction-item transaction-row"
-                onClick={() => {
-                  setSelectedTransaction(tx);
-                  setShowDeleteConfirm(false);
-                  setTab('transaction-detail');
-                }}
+                onClick={() => openTransactionDetail(tx)}
               >
                 <div className={`transaction-icon ${tx.type}`}>
                   {tx.type === 'income' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
@@ -519,24 +455,25 @@ function App() {
     <main className="add-transaction-shell">
       <header className="add-transaction-header">
         <button type="button" className="back-button" onClick={() => setTab(editingTransactionId ? 'transactions' : 'home')} aria-label={editingTransactionId ? 'Back to transactions' : 'Back to home'}>
-          <ArrowLeft size={22} />
+          <ArrowLeft size={20} />
         </button>
         <h1>{editingTransactionId ? 'Edit Transaction' : 'Add Transaction'}</h1>
       </header>
 
-      {renderStatus()}
       <section className="add-transaction-content">
         <div className="transaction-type-control" aria-label="Transaction type">
           <button
             type="button"
             className={form.type === 'income' ? 'active' : ''}
             onClick={() => setForm((current) => ({ ...current, type: 'income', categoryId: categories.find((category) => category.type === 'income')?.id || current.categoryId }))}
-          >Income</button>
+            >Income
+          </button>
           <button
             type="button"
             className={form.type === 'expense' ? 'active' : ''}
             onClick={() => setForm((current) => ({ ...current, type: 'expense', categoryId: categories.find((category) => category.name === 'Other')?.id || current.categoryId }))}
-          >Expense</button>
+            >Expense
+          </button>
         </div>
 
         <form className="transaction-form" onSubmit={handleSubmit}>
@@ -565,10 +502,7 @@ function App() {
           </select>
 
           <label htmlFor="transaction-date">Date</label>
-          <input id="transaction-date" name="date" type="date" required value={form.date} onChange={handleInputChange} />
-
-          <label htmlFor="transaction-notes">Notes (optional)</label>
-          <textarea id="transaction-notes" name="notes" value={form.notes} onChange={handleInputChange} />
+          <input id="transaction-date" name="date" type="date" value={form.date} onChange={handleInputChange} />
 
           <button className="primary-action full transaction-save-button" type="submit">
             {editingTransactionId ? 'Save Changes' : 'Save Transaction'}
@@ -590,7 +524,7 @@ function App() {
       type: selectedTransaction.type || 'expense',
       categoryId: selectedTransaction.categoryId,
       paymentMethodId: selectedTransaction.paymentMethodId,
-      date: selectedTransaction.date || getLocalDateString(),
+      date: selectedTransaction.date || new Date().toISOString().slice(0, 10),
       notes: selectedTransaction.notes || ''
     });
     setTab('add-transaction');
@@ -611,7 +545,6 @@ function App() {
           <h1>Transaction Detail</h1>
         </header>
 
-        {renderStatus()}
         <section className="detail-content">
           <div className="detail-summary">
             <span className={`detail-icon ${selectedTransaction.type}`}><Utensils size={26} strokeWidth={1.7} /></span>
@@ -622,10 +555,9 @@ function App() {
 
           <section className="detail-card">
             <div><span>Date</span><strong>{date.toLocaleDateString('en-PK')}</strong></div>
-            <div><span>Time</span><strong>{selectedTransaction.createdAt ? new Date(selectedTransaction.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '—'}</strong></div>
+            <div><span>Time</span><strong>{selectedTransaction.createdAt ? new Date(selectedTransaction.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '02:30 PM'}</strong></div>
             <div><span>Payment Method</span><strong>{methodName}</strong></div>
             <div><span>Description</span><strong>{selectedTransaction.title || 'No description'}</strong></div>
-            {selectedTransaction.notes ? <div><span>Notes</span><strong>{selectedTransaction.notes}</strong></div> : null}
           </section>
 
           <div className="detail-actions">
@@ -822,7 +754,6 @@ function App() {
           </div>
 
           <section className="onboarding-form">
-            {renderStatus()}
             <h3>
               Basic setup
               <p className="onboarding-helper">Start now and make it yours!</p>
@@ -880,7 +811,6 @@ function App() {
         </div>
       </header>
 
-      {renderStatus()}
       <main className="content">
         {tab === 'home' && renderHome()}
         {tab === 'transactions' && renderTransactions()}
