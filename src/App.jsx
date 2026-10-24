@@ -998,16 +998,10 @@ function App() {
 
   const renderTransactions = () => (
     <div className="stacked-blocks">
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Expenses</h2>
-        </div>
-
+      
         <button type="button" className="primary-action full transaction-list-add-button" onClick={openAddExpense}>
           <Plus size={16} /> Add Expense
         </button>
-      </section>
-
       <section className="panel">
         <div className="panel-header">
           <div>
