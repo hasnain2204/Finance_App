@@ -5,9 +5,11 @@ import {
   Download,
   PiggyBank,
   Plus,
+  ShieldCheck,
   TrendingUp,
   Upload,
-  Wallet
+  Wallet,
+  WalletCards
 } from 'lucide-react';
 import { db, seedDatabase } from './db/db';
 import { defaultBudgets, defaultCategories, defaultPaymentMethods } from './data/defaultData';
@@ -45,6 +47,8 @@ function App() {
   const [categoryInput, setCategoryInput] = useState('');
   const [methodInput, setMethodInput] = useState('');
   const [budgetInputs, setBudgetInputs] = useState({});
+  const [preferences, setPreferences] = useState(null);
+  const [onboardingName, setOnboardingName] = useState('');
   const fileInputRef = useRef(null);
 
   const categoryMap = useMemo(
@@ -101,17 +105,19 @@ function App() {
   const loadData = async () => {
     try {
       await seedDatabase();
-      const [allTx, allCategories, allMethods, allBudgets] = await Promise.all([
+      const [allTx, allCategories, allMethods, allBudgets, appPreferences] = await Promise.all([
         db.transactions.orderBy('date').reverse().toArray(),
         db.categories.orderBy('name').toArray(),
         db.paymentMethods.orderBy('name').toArray(),
-        db.budgets.toArray()
+        db.budgets.toArray(),
+        db.preferences.get('app')
       ]);
 
       setTransactions(allTx.map((tx) => ({ ...tx, amount: fromPaisa(Number(tx.amount || 0)) })));
       setCategories(allCategories.length ? allCategories : defaultCategories);
       setPaymentMethods(allMethods.length ? allMethods : defaultPaymentMethods);
       setBudgets(allBudgets.length ? allBudgets : defaultBudgets);
+      setPreferences(appPreferences || { id: 'app', currency: 'PKR', lightMode: true });
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
     }
@@ -120,6 +126,17 @@ function App() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleContinueOnboarding = async () => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', currency: 'PKR', lightMode: true }),
+      name: onboardingName.trim(),
+      onboardingCompleted: true
+    };
+
+    await db.preferences.put(nextPreferences);
+    setPreferences(nextPreferences);
+  };
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -591,6 +608,52 @@ function App() {
       </section>
     </div>
   );
+
+  if (preferences && !preferences.onboardingCompleted) {
+    return (
+      <main className="onboarding-shell">
+        {/* <div className="onboarding-brand">PWS</div> */}
+        <section className="onboarding-content">
+          <div className="onboarding-hero">
+            <span className="onboarding-icon"><WalletCards size={100} strokeWidth={1.75} /></span>
+            <h1>Welcome to PWS</h1>
+            <p>Manage your money here!</p>
+          </div>
+
+          <section className="onboarding-form">
+            <h3>
+              Basic setup
+              <p className="onboarding-helper">Start now and make it yours!</p>
+            </h3>
+
+            <label htmlFor="onboarding-name">Your name</label>
+            <input
+              id="onboarding-name"
+              value={onboardingName}
+              onChange={(event) => setOnboardingName(event.target.value)}
+              placeholder="Name (optional)"
+              autoComplete="name"
+            />
+
+            <div className="privacy-note">
+              <ShieldCheck size={20} />
+              <div>
+                <strong>Your data stays on this device</strong>
+                <span>Works offline. 
+                  {/* No account required. Export a backup regularly to keep your records safe. */}
+                  </span>
+              </div>
+            </div>
+
+            <button type="button" className="primary-action full onboarding-button" onClick={handleContinueOnboarding}>
+              Continue
+            </button>
+            <p className="currency-label">(PKR) · Light mode</p>
+          </section>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <div className="app-shell">
