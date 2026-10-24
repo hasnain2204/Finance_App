@@ -3,8 +3,12 @@ import {
   toPaisa,
   fromPaisa,
   formatCurrency,
-  calculateBalance,
-  calculateMonthlySummary,
+  calculateBudgetProgress,
+  calculateCumulativeBudgetTotal,
+  calculateCategoryExpenseTotals,
+  calculateExpenseTotal,
+  createBudgetHistoryEntry,
+  buildBackupPayload,
   getLocalDateString,
   validateTransaction
 } from './finance';
@@ -27,31 +31,95 @@ describe('finance utilities', () => {
     expect(formatCurrency(12.34)).toBe('PKR 12.34');
   });
 
-  it('calculates available balance from income and expense totals', () => {
-    const summary = calculateBalance([
-      { type: 'income', amount: 5000 },
+  it('calculates expense totals for all transactions or a selected month', () => {
+    const transactions = [
+      { type: 'income', amount: 5000, date: '2026-10-01' },
       { type: 'expense', amount: 1200 },
-      { type: 'income', amount: 2500 },
-      { type: 'expense', amount: 500 }
-    ]);
-
-    expect(summary.income).toBe(7500);
-    expect(summary.expense).toBe(1700);
-    expect(summary.balance).toBe(5800);
-  });
-
-  it('calculates monthly summary by period', () => {
-    const data = [
-      { type: 'income', amount: 1000, date: '2026-10-01T00:00:00.000Z' },
-      { type: 'expense', amount: 400, date: '2026-10-13T00:00:00.000Z' },
-      { type: 'expense', amount: 150, date: '2026-09-20T00:00:00.000Z' }
+      { type: 'expense', amount: 500, date: '2026-10-15' },
+      { type: 'expense', amount: 150, date: '2026-09-20' }
     ];
 
-    const summary = calculateMonthlySummary(data, '2026-10');
+    expect(calculateExpenseTotal(transactions)).toBe(1850);
+    expect(calculateExpenseTotal(transactions, '2026-10')).toBe(500);
+  });
 
-    expect(summary.income).toBe(1000);
-    expect(summary.expense).toBe(400);
-    expect(summary.balance).toBe(600);
+  it('adds each budget contribution to the existing cumulative total', () => {
+    const budgets = [
+      { id: 'budget-2026-09-overall', month: '2026-09', categoryId: 'overall', amount: 25000 },
+      { id: 'budget-2026-10-overall', month: '2026-10', categoryId: 'overall', amount: 50000 }
+    ];
+    const history = [
+      { entryType: 'addition', amount: 12500 },
+      { entryType: 'addition', amount: 8000 },
+      { entryType: 'legacy', amount: 90000 }
+    ];
+
+    expect(calculateCumulativeBudgetTotal(budgets, history)).toBe(95500);
+    expect(calculateCumulativeBudgetTotal([
+      ...budgets,
+      { id: 'budget-all-overall', month: 'all', categoryId: 'overall', amount: 100000 }
+    ], history)).toBe(100000);
+  });
+
+  it('calculates expense totals per category for a selected month', () => {
+    const data = [
+      { type: 'expense', categoryId: 'food', amount: 400, date: '2026-10-13' },
+      { type: 'expense', categoryId: 'food', amount: 100, date: '2026-10-19' },
+      { type: 'expense', categoryId: 'travel', amount: 150, date: '2026-09-20' },
+      { type: 'income', categoryId: 'food', amount: 1000, date: '2026-10-01' }
+    ];
+
+    expect(calculateCategoryExpenseTotals(data, '2026-10')).toEqual({ food: 500 });
+  });
+
+  it('calculates remaining and over-budget progress', () => {
+    expect(calculateBudgetProgress(1000, 400)).toEqual({
+      remaining: 600,
+      percent: 40,
+      isOverBudget: false
+    });
+    expect(calculateBudgetProgress(1000, 1200)).toEqual({
+      remaining: -200,
+      percent: 120,
+      isOverBudget: true
+    });
+  });
+
+  it('records budget entries with the selected date and description', () => {
+    const timestamp = new Date('2026-10-24T12:00:00.000Z');
+
+    expect(createBudgetHistoryEntry('2026-10', 'overall', null, 125000, 'Monthly plan', '2026-10-23', timestamp)).toEqual({
+      month: '2026-10',
+      categoryId: 'overall',
+      date: '2026-10-23',
+      createdAt: timestamp.toISOString(),
+      previousAmount: null,
+      amount: 125000,
+      description: 'Monthly plan'
+    });
+    expect(createBudgetHistoryEntry('2026-10', 'overall', 125000, 125000, '', '2026-10-24', timestamp).amount).toBe(125000);
+    expect(createBudgetHistoryEntry('2026-10', 'cat-food', 125000, null, '', '2026-10-24', timestamp).amount).toBeNull();
+  });
+
+  it('includes budgets in version 2 backups', () => {
+    const budget = { id: 'budget-2026-10-overall', categoryId: 'overall', month: '2026-10', amount: 125000 };
+    const history = {
+      id: 1,
+      month: '2026-10',
+      date: '2026-10-24',
+      createdAt: '2026-10-24T12:00:00.000Z',
+      previousAmount: null,
+      amount: 125000
+    };
+    const backup = JSON.parse(buildBackupPayload({
+      transactions: [],
+      budgets: [budget],
+      budgetHistory: [history]
+    }));
+
+    expect(backup.version).toBe(2);
+    expect(backup.budgets).toEqual([budget]);
+    expect(backup.budgetHistory).toEqual([history]);
   });
 
   it('formats dates using the local calendar date', () => {

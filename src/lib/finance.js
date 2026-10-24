@@ -23,29 +23,63 @@ export function formatCurrency(value) {
   return `PKR ${formatted}`;
 }
 
-export function calculateBalance(transactions = []) {
-  const income = transactions
-    .filter((tx) => tx.type === 'income')
+export function calculateExpenseTotal(transactions = [], month) {
+  return transactions
+    .filter((tx) => tx.type === 'expense' && (!month || tx.date?.startsWith(month)))
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+}
 
-  const expense = transactions
-    .filter((tx) => tx.type === 'expense')
-    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+export function calculateCumulativeBudgetTotal(budgets = [], budgetHistory = []) {
+  const cumulativeBudget = budgets.find((budget) => budget.id === 'budget-all-overall');
+  if (cumulativeBudget) return Number(cumulativeBudget.amount || 0);
+
+  const legacyBudgets = budgets
+    .filter((budget) => budget.categoryId === 'overall' && budget.month !== 'all')
+    .reduce((total, budget) => total + Number(budget.amount || 0), 0);
+  const additions = budgetHistory
+    .filter((entry) => entry.entryType === 'addition')
+    .reduce((total, entry) => total + Number(entry.amount || 0), 0);
+
+  return legacyBudgets + additions;
+}
+
+export function calculateCategoryExpenseTotals(transactions = [], month) {
+  return transactions.reduce((totals, tx) => {
+    if (tx.type !== 'expense' || (month && !tx.date?.startsWith(month))) return totals;
+    totals[tx.categoryId] = (totals[tx.categoryId] || 0) + Number(tx.amount || 0);
+    return totals;
+  }, {});
+}
+
+export function calculateBudgetProgress(limit, spent) {
+  const budget = Math.max(0, Number(limit) || 0);
+  const expense = Math.max(0, Number(spent) || 0);
 
   return {
-    income,
-    expense,
-    balance: income - expense
+    remaining: budget - expense,
+    percent: budget > 0 ? (expense / budget) * 100 : 0,
+    isOverBudget: budget > 0 && expense > budget
   };
 }
 
-export function calculateMonthlySummary(transactions = [], month = getLocalDateString().slice(0, 7)) {
-  const monthTransactions = transactions.filter((tx) => {
-    if (!tx.date) return false;
-    return tx.date.startsWith(month);
-  });
-
-  return calculateBalance(monthTransactions);
+export function createBudgetHistoryEntry(
+  month,
+  categoryId,
+  previousAmount,
+  amount,
+  description = '',
+  date = getLocalDateString(),
+  timestamp = new Date()
+) {
+  return {
+    month,
+    categoryId,
+    date,
+    createdAt: timestamp.toISOString(),
+    previousAmount,
+    amount,
+    description: description.trim()
+  };
 }
 
 export function validateTransaction(formValues) {
@@ -76,7 +110,7 @@ export function validateTransaction(formValues) {
 
 export function buildBackupPayload(data) {
   return JSON.stringify({
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     ...data
   }, null, 2);

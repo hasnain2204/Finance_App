@@ -5,13 +5,13 @@ The project is an early functional prototype, not a complete V1 release.
 
 ### Implemented
 - Local-first React/Vite PWA scaffold with Dexie/IndexedDB persistence
-- First-run onboarding and dashboard balance, income, expense, and weekly spending views
-- Income/expense entry, transaction history, detail, edit, and delete flows
-- Monthly totals, category/payment-method management, and JSON backup/restore
+- First-run onboarding and an expense-only dashboard with monthly and weekly spending views
+- Expense history, details, edit, and delete flows
+- One cumulative overall budget with dated additions and expense-adjusted balance
+- Category/payment-method management and JSON backup/restore
 
 ### Incomplete or not yet verified
-- Budget planning is currently a placeholder.
-- Analytics are limited; weekly and category reporting are not complete.
+- Analytics are limited; weekly and category reporting need further validation.
 - Settings and support screens are not implemented beyond onboarding preferences.
 - Automated coverage is limited to finance utility tests; UI, persistence, backup/restore, and offline behavior need tests.
 - PWA build configuration exists, but installation and offline behavior have not been manually verified.

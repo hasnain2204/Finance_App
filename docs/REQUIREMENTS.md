@@ -16,17 +16,16 @@ PWS V1 is a personal finance and expense-tracking PWA for Pakistan, designed for
 ## In-scope V1 expectations
 - Welcome/setup screen
 - Home/overview dashboard
-- Available balance
-- Income and expense totals
+- Monthly expense total
 - Weekly spending overview
 - Recent transactions
-- Add income and expense transactions
+- Add expense transactions only
 - Transaction history
-- All, income, and expense views
+- Expense history
 - Transaction details
 - Edit and delete flows
-- Analytics by week, month, and category
-- Monthly budget and category budgets
+- Expense analytics by week, month, and category
+- Cumulative overall budget additions; previous additions remain in the total balance
 - Category management
 - Payment method management
 - Backup/restore flows
@@ -48,3 +47,8 @@ PWS V1 is a personal finance and expense-tracking PWA for Pakistan, designed for
 ## Major unresolved items
 - Final screen inventory and actual Figma review are currently blocked by access restrictions.
 - Some product decisions must be confirmed by the user before feature-level implementation.
+
+## Expense-only scope
+- Income entry, income categories, and income history are excluded.
+- Existing income transactions are removed when the local database upgrades to the expense-only version.
+- Dashboard and analytics totals report expenses only.

@@ -6,8 +6,7 @@ export const defaultCategories = [
   { id: 'cat-shopping', name: 'Shopping', type: 'expense' },
   { id: 'cat-health', name: 'Health', type: 'expense' },
   { id: 'cat-entertainment', name: 'Entertainment', type: 'expense' },
-  { id: 'cat-other', name: 'Other', type: 'expense' },
-  { id: 'cat-income', name: 'Income', type: 'income' }
+  { id: 'cat-other', name: 'Other', type: 'expense' }
 ];
 
 export const defaultPaymentMethods = [

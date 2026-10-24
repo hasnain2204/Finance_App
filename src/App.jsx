@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownLeft,
   ArrowLeft,
   ArrowLeftRight,
-  CalendarDays,
-  Clock3,
   ArrowUpRight,
   ChartNoAxesCombined,
   Download,
@@ -22,10 +19,13 @@ import { db, seedDatabase } from './db/db';
 import { defaultCategories, defaultPaymentMethods } from './data/defaultData';
 import {
   buildBackupPayload,
-  calculateBalance,
-  calculateMonthlySummary,
+  calculateCumulativeBudgetTotal,
+  calculateCategoryExpenseTotals,
+  calculateExpenseTotal,
+  createBudgetHistoryEntry,
   formatCurrency,
   fromPaisa,
+  getLocalDateString,
   toPaisa,
   validateTransaction
 } from './lib/finance';
@@ -33,10 +33,9 @@ import {
 const initialForm = {
   title: '',
   amount: '',
-  type: 'expense',
   categoryId: defaultCategories.find((category) => category.name === 'Other')?.id || defaultCategories[0].id,
   paymentMethodId: defaultPaymentMethods.find((method) => method.name === 'Other')?.id || defaultPaymentMethods[0].id,
-  date: new Date().toISOString().slice(0, 10),
+  date: getLocalDateString(),
   notes: ''
 };
 
@@ -45,9 +44,16 @@ const navItems = ['home', 'transactions', 'analytics', 'budget'];
 function App() {
   const [tab, setTab] = useState('home');
   const [transactions, setTransactions] = useState([]);
+  const [budgetHistory, setBudgetHistory] = useState([]);
   const [categories, setCategories] = useState(defaultCategories);
   const [paymentMethods, setPaymentMethods] = useState(defaultPaymentMethods);
-  const [view, setView] = useState('all');
+  const [budgets, setBudgets] = useState([]);
+  const [budgetForm, setBudgetForm] = useState({
+    date: getLocalDateString(),
+    amount: '',
+    description: ''
+  });
+  const [editingBudgetHistoryId, setEditingBudgetHistoryId] = useState(null);
   const [form, setForm] = useState(initialForm);
   const [status, setStatus] = useState({ type: 'idle', message: '' });
   const [categoryInput, setCategoryInput] = useState('');
@@ -70,17 +76,25 @@ function App() {
     [paymentMethods]
   );
 
-  const summary = useMemo(() => calculateBalance(transactions), [transactions]);
-  const monthlySummary = useMemo(
-    () => calculateMonthlySummary(transactions, new Date().toISOString().slice(0, 7)),
+  const monthlyExpense = useMemo(
+    () => calculateExpenseTotal(transactions, getLocalDateString().slice(0, 7)),
     [transactions]
   );
+  const totalBudgetPaisa = useMemo(() => {
+    return calculateCumulativeBudgetTotal(budgets, budgetHistory);
+  }, [budgets, budgetHistory]);
 
-  const filteredTransactions = useMemo(() => {
-    return [...transactions]
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .filter((tx) => (view === 'all' ? true : tx.type === view));
-  }, [transactions, view]);
+  const filteredTransactions = useMemo(
+    () => [...transactions].filter((tx) => tx.type === 'expense').sort((a, b) => new Date(b.date) - new Date(a.date)),
+    [transactions]
+  );
+  const transactionHistory = useMemo(() => [
+    ...filteredTransactions.map((transaction) => ({ ...transaction, historyType: 'expense' })),
+    ...budgetHistory.map((entry) => ({ ...entry, historyType: 'budget' }))
+  ].sort((a, b) => (
+    String(b.date || '').localeCompare(String(a.date || '')) ||
+    String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+  )), [filteredTransactions, budgetHistory]);
 
   const weeklySpending = useMemo(() => {
     const days = Array.from({ length: 7 }, (_, index) => {
@@ -90,7 +104,7 @@ function App() {
     });
 
     return days.map((day) => {
-      const iso = day.toISOString().slice(0, 10);
+      const iso = getLocalDateString(day);
       const total = transactions
         .filter((tx) => tx.type === 'expense' && tx.date.startsWith(iso))
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
@@ -100,30 +114,43 @@ function App() {
   }, [transactions]);
 
   const categoryTotals = useMemo(() => {
-    const totals = {};
-
-    transactions.forEach((tx) => {
-      if (tx.type !== 'expense') return;
-      const categoryName = categoryMap[tx.categoryId]?.name || 'Unknown';
-      totals[categoryName] = (totals[categoryName] || 0) + Number(tx.amount || 0);
-    });
-
-    return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    const totalsByCategory = calculateCategoryExpenseTotals(transactions, getLocalDateString().slice(0, 7));
+    return Object.entries(totalsByCategory)
+      .map(([categoryId, total]) => [categoryMap[categoryId]?.name || 'Unknown', total])
+      .sort((a, b) => b[1] - a[1]);
   }, [transactions, categoryMap]);
 
   const loadData = async () => {
     try {
       await seedDatabase();
-      const [allTx, allCategories, allMethods, appPreferences] = await Promise.all([
+      const [allTx, allCategories, allMethods, loadedBudgets, allBudgetHistory, appPreferences] = await Promise.all([
         db.transactions.orderBy('date').reverse().toArray(),
         db.categories.orderBy('name').toArray(),
         db.paymentMethods.orderBy('name').toArray(),
+        db.budgets.toArray(),
+        db.budgetHistory.toArray(),
         db.preferences.get('app')
       ]);
+      let allBudgets = loadedBudgets;
+      if (!allBudgets.some((budget) => budget.id === 'budget-all-overall')) {
+        const total = calculateCumulativeBudgetTotal(allBudgets, allBudgetHistory);
+        if (total > 0) {
+          const cumulativeBudget = {
+            id: 'budget-all-overall',
+            categoryId: 'overall',
+            month: 'all',
+            amount: total
+          };
+          await db.budgets.put(cumulativeBudget);
+          allBudgets = [...allBudgets, cumulativeBudget];
+        }
+      }
 
-      setTransactions(allTx.map((tx) => ({ ...tx, amount: fromPaisa(Number(tx.amount || 0)) })));
-      setCategories(allCategories.length ? allCategories : defaultCategories);
+      setTransactions(allTx.filter((tx) => tx.type === 'expense').map((tx) => ({ ...tx, amount: fromPaisa(Number(tx.amount || 0)) })));
+      setBudgetHistory(allBudgetHistory);
+      setCategories(allCategories.filter((category) => category.type === 'expense'));
       setPaymentMethods(allMethods.length ? allMethods : defaultPaymentMethods);
+      setBudgets(allBudgets);
       setPreferences(appPreferences || { id: 'app', currency: 'PKR', lightMode: true });
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
@@ -154,6 +181,158 @@ function App() {
     setForm((current) => ({ ...current, [name]: value }));
   };
 
+  const handleBudgetFormChange = (event) => {
+    const { name, value } = event.target;
+    setBudgetForm((current) => ({ ...current, [name]: value }));
+    setStatus({ type: 'idle', message: '' });
+  };
+
+  const setActiveBudget = async (month, categoryId, amount) => {
+    const id = `budget-${month}-${categoryId}`;
+    if (amount === null) {
+      await db.budgets.delete(id);
+    } else {
+      await db.budgets.put({ id, categoryId, month, amount });
+    }
+  };
+
+  const recalculateCumulativeBudget = async () => {
+    const [allBudgets, allHistory] = await Promise.all([
+      db.budgets.toArray(),
+      db.budgetHistory.toArray()
+    ]);
+    const total = calculateCumulativeBudgetTotal(
+      allBudgets.filter((budget) => budget.id !== 'budget-all-overall'),
+      allHistory
+    );
+    await db.budgets.put({
+      id: 'budget-all-overall',
+      categoryId: 'overall',
+      month: 'all',
+      amount: total
+    });
+  };
+
+  const handleSaveBudget = async (event) => {
+    event.preventDefault();
+    const { date, amount, description } = budgetForm;
+    const numericAmount = Number(amount);
+    const parsedDate = new Date(`${date}T00:00:00`);
+    const amountIsValid = (
+      Number.isFinite(numericAmount) &&
+      numericAmount > 0 &&
+      /^\d+(\.\d{1,2})?$/.test(amount) &&
+      Number.isSafeInteger(toPaisa(numericAmount))
+    );
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.getFullYear() !== Number(date.slice(0, 4)) ||
+      parsedDate.getMonth() + 1 !== Number(date.slice(5, 7)) ||
+      parsedDate.getDate() !== Number(date.slice(8, 10)) ||
+      !amountIsValid
+    ) {
+      setStatus({ type: 'error', message: 'Enter a valid date and positive budget amount.' });
+      return;
+    }
+
+    const month = date.slice(0, 7);
+    const paisaAmount = toPaisa(numericAmount);
+    const timestamp = new Date();
+    try {
+      await db.transaction('rw', db.budgets, db.budgetHistory, async () => {
+        const existingHistory = editingBudgetHistoryId
+          ? await db.budgetHistory.get(editingBudgetHistoryId)
+          : null;
+        if (editingBudgetHistoryId && !existingHistory) {
+          throw new Error('Budget history entry no longer exists.');
+        }
+
+        if (existingHistory && existingHistory.entryType !== 'addition') {
+          const oldMonth = existingHistory.month;
+          const categoryId = existingHistory.categoryId || 'overall';
+          const oldMonthBudget = await db.budgets.get(`budget-${oldMonth}-${categoryId}`);
+          const historyEntry = {
+            ...existingHistory,
+            month,
+            date,
+            amount: paisaAmount,
+            description: description.trim(),
+            createdAt: timestamp.toISOString()
+          };
+          if (oldMonth !== month) {
+            const oldMonthHistory = await db.budgetHistory
+              .where('month').equals(oldMonth)
+              .filter((entry) => entry.id !== existingHistory.id && (entry.categoryId || 'overall') === categoryId && entry.entryType !== 'addition')
+              .toArray();
+            oldMonthHistory.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+            await setActiveBudget(
+              oldMonth,
+              categoryId,
+              oldMonthHistory.length ? oldMonthHistory[0].amount : existingHistory.previousAmount ?? null
+            );
+          }
+          historyEntry.previousAmount = oldMonth === month ? oldMonthBudget?.amount ?? null : null;
+          await db.budgetHistory.put(historyEntry);
+          await setActiveBudget(month, categoryId, paisaAmount);
+          await recalculateCumulativeBudget();
+        } else {
+          const cumulativeBudget = await db.budgets.get('budget-all-overall');
+          const allBudgets = await db.budgets.toArray();
+          const allHistory = await db.budgetHistory.toArray();
+          const currentTotal = cumulativeBudget?.amount ?? calculateCumulativeBudgetTotal(allBudgets, allHistory);
+          const addition = existingHistory
+            ? paisaAmount - Number(existingHistory.amount || 0)
+            : paisaAmount;
+          const entryTotal = existingHistory
+            ? currentTotal - Number(existingHistory.amount || 0)
+            : currentTotal;
+          const historyEntry = existingHistory
+            ? {
+                ...existingHistory,
+                month,
+                categoryId: 'overall',
+                date,
+                previousAmount: entryTotal,
+                amount: paisaAmount,
+                description: description.trim(),
+                createdAt: timestamp.toISOString(),
+                entryType: 'addition'
+              }
+            : {
+                ...createBudgetHistoryEntry(month, 'overall', currentTotal, paisaAmount, description, date, timestamp),
+                entryType: 'addition'
+              };
+          await db.budgetHistory[existingHistory ? 'put' : 'add'](historyEntry);
+          await db.budgets.put({
+            id: 'budget-all-overall',
+            categoryId: 'overall',
+            month: 'all',
+            amount: currentTotal + addition
+          });
+        }
+      });
+      await loadData();
+      setEditingBudgetHistoryId(null);
+      setBudgetForm({ date: getLocalDateString(), amount: '', description: '' });
+      setSelectedTransaction(null);
+      setStatus({ type: 'success', message: 'Budget saved.' });
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Could not save budget. Please try again.' });
+    }
+  };
+
+  const openBudgetHistoryEditor = (entry) => {
+    setEditingBudgetHistoryId(entry.id);
+    setBudgetForm({
+      date: entry.date,
+      amount: entry.amount === null ? '' : String(fromPaisa(entry.amount)),
+      description: entry.description || ''
+    });
+    setStatus({ type: 'idle', message: '' });
+    setTab('budget');
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -163,17 +342,15 @@ function App() {
       return;
     }
 
-    const titlePrefix = form.type === 'income' ? 'Income' : 'Expense';
     const highestNumber = transactions.reduce((highest, tx) => {
-      if (tx.type !== form.type) return highest;
-      const match = String(tx.title || '').match(new RegExp(`^${titlePrefix}(\\d+)$`, 'i'));
+      const match = String(tx.title || '').match(/^Expense(\d+)$/i);
       return match ? Math.max(highest, Number(match[1])) : highest;
     }, 0);
-    const defaultTitle = `${titlePrefix}${highestNumber + 1}`;
+    const defaultTitle = `Expense${highestNumber + 1}`;
     const nextPayload = {
       title: form.title.trim() || defaultTitle,
       amount: toPaisa(Number(form.amount)),
-      type: form.type,
+      type: 'expense',
       categoryId: form.categoryId,
       paymentMethodId: form.paymentMethodId,
       date: form.date,
@@ -200,12 +377,39 @@ function App() {
 
   const handleDelete = async () => {
     if (!selectedTransaction?.id) return;
-    await db.transactions.delete(selectedTransaction.id);
+    if (selectedTransaction.historyType === 'budget') {
+      const entry = selectedTransaction;
+      const month = entry.month;
+      const categoryId = entry.categoryId || 'overall';
+      await db.transaction('rw', db.budgets, db.budgetHistory, async () => {
+        if (entry.entryType !== 'addition') {
+          const remainingHistory = await db.budgetHistory
+            .where('month').equals(month)
+            .filter((historyEntry) => (
+              historyEntry.id !== entry.id &&
+              historyEntry.entryType !== 'addition' &&
+              (historyEntry.categoryId || 'overall') === categoryId
+            ))
+            .toArray();
+          remainingHistory.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+          await setActiveBudget(
+            month,
+            categoryId,
+            remainingHistory.length ? remainingHistory[0].amount : entry.previousAmount ?? null
+          );
+        }
+        await db.budgetHistory.delete(entry.id);
+        await recalculateCumulativeBudget();
+      });
+    } else {
+      await db.transactions.delete(selectedTransaction.id);
+    }
+    const destination = selectedTransaction.returnTab || 'transactions';
     setShowDeleteConfirm(false);
     setSelectedTransaction(null);
     setStatus({ type: 'idle', message: '' });
     await loadData();
-    setTab('transactions');
+    setTab(destination);
   };
 
   const handleAddCategory = async () => {
@@ -234,7 +438,7 @@ function App() {
   };
 
   const handleExport = () => {
-    const payload = buildBackupPayload({ transactions, categories, paymentMethods });
+    const payload = buildBackupPayload({ transactions, categories, paymentMethods, budgets, budgetHistory });
     const blob = new Blob([payload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -252,29 +456,71 @@ function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (!parsed || !Array.isArray(parsed.transactions)) {
+      if (!parsed || ![1, 2].includes(parsed.version) || !Array.isArray(parsed.transactions)) {
         throw new Error('Invalid backup format');
       }
 
-      await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, async () => {
+      const restoredCategories = Array.isArray(parsed.categories)
+        ? parsed.categories.filter((category) => category.type === 'expense')
+        : defaultCategories;
+      const restoredCategoryIds = new Set(restoredCategories.map((category) => category.id));
+      const restoredTransactions = parsed.transactions
+        .filter((tx) => tx.type === 'expense')
+        .map((tx) => ({
+          ...tx,
+          amount: toPaisa(Number(tx.amount || 0))
+        }));
+      const restoredBudgets = Array.isArray(parsed.budgets)
+        ? parsed.budgets
+            .filter((budget) =>
+              budget.categoryId === 'overall' || restoredCategoryIds.has(budget.categoryId)
+            )
+            .map((budget) => ({
+              ...budget,
+              amount: parsed.version === 1 ? toPaisa(Number(budget.amount || 0)) : Number(budget.amount)
+            }))
+        : [];
+      const restoredBudgetHistory = Array.isArray(parsed.budgetHistory)
+        ? parsed.budgetHistory.map((entry) => {
+            const validAmount = (amount) => amount === null || (Number.isSafeInteger(amount) && amount >= 0);
+            if (
+              !entry ||
+              !/^\d{4}-\d{2}$/.test(entry.month) ||
+              !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
+              typeof entry.createdAt !== 'string' ||
+              Number.isNaN(new Date(entry.createdAt).getTime()) ||
+              (entry.categoryId !== undefined && (typeof entry.categoryId !== 'string' || !entry.categoryId)) ||
+              (entry.description !== undefined && typeof entry.description !== 'string') ||
+              !validAmount(entry.previousAmount) ||
+              !validAmount(entry.amount)
+            ) {
+              throw new Error('Invalid budget history in backup');
+            }
+            return { ...entry };
+          })
+        : [];
+
+      await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.budgets, db.budgetHistory, async () => {
         await db.transactions.clear();
         await db.categories.clear();
         await db.paymentMethods.clear();
+        await db.budgets.clear();
+        await db.budgetHistory.clear();
 
-        if (Array.isArray(parsed.categories)) await db.categories.bulkPut(parsed.categories);
+        if (restoredCategories.length) await db.categories.bulkPut(restoredCategories);
         if (Array.isArray(parsed.paymentMethods)) await db.paymentMethods.bulkPut(parsed.paymentMethods);
-        if (Array.isArray(parsed.transactions)) {
-          await db.transactions.bulkPut(
-            parsed.transactions.map((tx) => ({
-              ...tx,
-              amount: toPaisa(Number(tx.amount || 0))
-            }))
-          );
-        }
+        if (restoredTransactions.length) await db.transactions.bulkPut(restoredTransactions);
+        if (restoredBudgets.length) await db.budgets.bulkPut(restoredBudgets);
+        if (restoredBudgetHistory.length) await db.budgetHistory.bulkPut(restoredBudgetHistory);
       });
 
-      setStatus({ type: 'success', message: 'Backup restored successfully.' });
-      setTimeout(() => loadData(), 200);
+      await loadData();
+      setStatus({
+        type: 'success',
+        message: parsed.transactions.some((tx) => tx.type === 'income')
+          ? 'Backup restored. Income transactions were not imported.'
+          : 'Backup restored successfully.'
+      });
     } catch (error) {
       setStatus({ type: 'error', message: 'The selected file could not be restored.' });
     } finally {
@@ -283,104 +529,154 @@ function App() {
   };
 
   const openTransactionDetail = (transaction) => {
-    setSelectedTransaction(transaction);
+    setSelectedTransaction({ ...transaction, returnTab: tab });
     setShowDeleteConfirm(false);
     setTab('transaction-detail');
   };
 
-  const renderHome = () => (
-    <>
-      <section className="home-heading-meta">
-        <h2>{`Good ${new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 18 ? 'Afternoon' : 'Evening'}, ${preferences?.name || 'User'}`}</h2>
-        <p>{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
-      </section>
+  const renderHistoryItem = (entry) => {
+    const isBudgetChange = entry.historyType === 'budget';
+    const categoryId = entry.categoryId || 'overall';
+    const isBudgetAddition = entry.entryType === 'addition';
+    const budgetLabel = categoryId === 'overall'
+      ? 'Overall budget'
+      : `${categoryMap[categoryId]?.name || 'Category'} budget`;
+    const title = isBudgetChange
+      ? isBudgetAddition
+        ? 'Budget added'
+        : entry.amount === null
+          ? `${budgetLabel} removed`
+          : entry.previousAmount === null
+            ? `${budgetLabel} set`
+            : `${budgetLabel} updated`
+      : entry.title;
+    const subtitle = isBudgetChange
+      ? isBudgetAddition
+        ? 'Added to overall budget'
+        : `${budgetLabel} · ${new Date(`${entry.month}-01T00:00:00`).toLocaleDateString('en-PK', { month: 'short', year: 'numeric' })}`
+      : `${categoryMap[entry.categoryId]?.name || 'Category'} · ${paymentMap[entry.paymentMethodId]?.name || 'Method'}`;
+    const amount = isBudgetChange
+      ? entry.amount === null
+        ? 'Removed'
+        : formatCurrency(fromPaisa(entry.amount))
+      : `-${formatCurrency(Number(entry.amount || 0))}`;
 
-      <section className="hero-panel">
-        <div className="hero-topline">
-          <span className="muted-label">Available balance</span>
+    return (
+      <button
+        key={`${entry.historyType}-${entry.id}`}
+        type="button"
+        className="transaction-item transaction-row"
+        onClick={() => openTransactionDetail(entry)}
+        aria-label={`View ${title} transaction`}
+      >
+        <div className={`transaction-icon ${isBudgetChange ? 'budget-change' : 'expense'}`}>
+          {isBudgetChange ? <WalletCards size={16} /> : <ArrowUpRight size={16} />}
         </div>
-        <div className="hero-amount">{formatCurrency(summary.balance)}</div>
-        <div className="quick-metrics">
-          <div className="quick-metrics_income">
-            <span>Income</span>
-            <strong className="income">{formatCurrency(summary.income)}</strong>
+        <div className="transaction-copy">
+          <strong>{title}</strong>
+          <span>{subtitle}</span>
+          {isBudgetChange && entry.description ? <span>{entry.description}</span> : null}
+        </div>
+        <div className="transaction-meta align-right">
+          <strong className={isBudgetChange ? 'budget-change-value' : 'expense'}>{amount}</strong>
+          <span>{new Date(`${entry.date}T00:00:00`).toLocaleDateString('en-PK')}</span>
+        </div>
+      </button>
+    );
+  };
+
+  const renderHome = () => {
+    const hasBudget = budgets.some((budget) => budget.categoryId === 'overall');
+    const overallBudgetAmount = hasBudget ? fromPaisa(totalBudgetPaisa) : null;
+    const availableBalance = overallBudgetAmount === null
+      ? null
+      : overallBudgetAmount - calculateExpenseTotal(transactions);
+
+    return (
+      <div className="home-dashboard">
+        <section className="home-heading-meta">
+          <h2>{`Good ${new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 18 ? 'Afternoon' : 'Evening'}, ${preferences?.name || 'User'}`}</h2>
+          <p>{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+        </section>
+
+        <section className="hero-panel home-summary-card">
+          <div className="home-balance">
+            <span>Available balance</span>
+            {availableBalance === null ? (
+              <button type="button" className="home-budget-prompt" onClick={() => setTab('budget')}>
+                Add to budget
+              </button>
+            ) : (
+              <strong className={availableBalance < 0 ? 'expense' : ''}>
+                {formatCurrency(availableBalance)}
+              </strong>
+            )}
           </div>
-          <div className="quick-metrics_expense">
-            <span>Expense</span>
-            <strong className="expense">{formatCurrency(summary.expense)}</strong>
+
+          <div className="home-summary-metrics">
+            <div className="home-summary-metric home-budget-metric">
+              <span>Budget</span>
+              <strong>{overallBudgetAmount === null ? 'Not set' : formatCurrency(overallBudgetAmount)}</strong>
+            </div>
+            <div className="home-summary-metric home-expense-metric">
+              <span>Total expenses</span>
+              <strong>{formatCurrency(calculateExpenseTotal(transactions))}</strong>
+            </div>
           </div>
-        </div>
-        <button type="button" className="primary-action full hero-add-button" onClick={() => setTab('add-transaction')}>
-          <Plus size={16} /> Add Transaction
-        </button>
-      </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Weekly spending</h2>
-        </div>
+          <button type="button" className="primary-action full hero-add-button" onClick={openAddExpense}>
+            <Plus size={16} /> Add Transaction
+          </button>
+        </section>
 
-        <div className="chart-bars" aria-label="Weekly spending chart">
-          {weeklySpending.map((day) => {
-            const max = Math.max(...weeklySpending.map((item) => item.value), 1);
-            return (
-              <div key={day.label} className="bar-column">
-                <span className="bar-value">{Math.round(day.value).toLocaleString('en-PK')}</span>
-                <span className="bar" style={{ height: `${Math.max(18, (day.value / max) * 100)}%` }} />
-                <small>{day.label.slice(0, 3)}</small>
-              </div>
-            );
-          })}
-        </div>
-        <p className="chart-footer">Expenses in PKR (Rs)</p>
-      </section>
+        <section className="panel home-chart-card">
+          <div className="panel-header">
+            <h2>Weekly spending</h2>
+          </div>
 
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Recent transactions</h2>
-          <button type="button" className="link-button" onClick={() => setTab('transactions')}>View all</button>
-        </div>
+          <div className="chart-bars" aria-label="Weekly spending chart">
+            {weeklySpending.map((day) => {
+              const max = Math.max(...weeklySpending.map((item) => item.value), 1);
+              return (
+                <div key={day.label} className="bar-column">
+                  <span className="bar-value">{Math.round(day.value).toLocaleString('en-PK')}</span>
+                  <span className="bar" style={{ height: `${Math.max(18, (day.value / max) * 100)}%` }} />
+                  <small>{day.label.slice(0, 3)}</small>
+                </div>
+              );
+            })}
+          </div>
+          <p className="chart-footer">Expenses in PKR (Rs)</p>
+        </section>
 
-        <div className="transaction-list compact">
-          {filteredTransactions.slice(0, 4).map((tx) => (
-            <button
-              key={tx.id}
-              type="button"
-              className="transaction-item transaction-row"
-              onClick={() => openTransactionDetail(tx)}
-              aria-label={`View ${tx.title} transaction`}
-            >
-              <div className={`transaction-icon ${tx.type}`}>
-                {tx.type === 'income' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
-              </div>
-              <div className="transaction-copy">
-                <strong>{tx.title}</strong>
-                <span>{categoryMap[tx.categoryId]?.name || 'Category'}</span>
-              </div>
-              <div className="transaction-meta">
-                <strong className={tx.type}>{tx.type === 'income' ? '+' : '-'}{formatCurrency(Number(tx.amount || 0))}</strong>
-                <span>{new Date(tx.date).toLocaleDateString('en-PK')}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-    </>
-  );
+        <section className="panel home-recent-card">
+          <div className="panel-header">
+            <h2>Recent transactions</h2>
+            <button type="button" className="link-button" onClick={() => setTab('transactions')}>View All</button>
+          </div>
 
-  const openAddTransactionFromFilter = () => {
+          <div className="transaction-list compact">
+            {transactionHistory.length === 0 ? (
+              <div className="empty-state">No transactions yet.</div>
+            ) : (
+              transactionHistory.slice(0, 4).map(renderHistoryItem)
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  };
+
+  const openAddExpense = () => {
     setEditingTransactionId(null);
     setSelectedTransaction(null);
     setForm((current) => {
       const expenseCategory = categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
-      const incomeCategory = categories.find((category) => category.type === 'income')?.id || expenseCategory;
       const otherMethod = paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
-      const type = view === 'all' ? 'expense' : view;
 
       return {
         ...initialForm,
-        type,
-        categoryId: type === 'income' ? incomeCategory : expenseCategory,
+        categoryId: expenseCategory,
         paymentMethodId: otherMethod
       };
     });
@@ -391,60 +687,26 @@ function App() {
     <div className="stacked-blocks">
       <section className="panel">
         <div className="panel-header">
-          {/* <h2>Transactions</h2> */}
+          <h2>Expenses</h2>
         </div>
 
-        <div className="segmented-control">
-          {['all', 'income', 'expense'].map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={view === item ? 'seg-button active' : 'seg-button'}
-              onClick={() => setView(item)}
-            >
-              {item === 'all' ? 'All' : item === 'income' ? 'Income' : 'Expense'}
-            </button>
-          ))}
-        </div>
-
-        <button type="button" className="primary-action full transaction-list-add-button" onClick={openAddTransactionFromFilter}>
-          <Plus size={16} /> {view === 'income' ? 'Add Income' : view === 'expense' ? 'Add Expense' : 'Add Transaction'}
+        <button type="button" className="primary-action full transaction-list-add-button" onClick={openAddExpense}>
+          <Plus size={16} /> Add Expense
         </button>
       </section>
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Transaction list
-              {/* <p className="eyebrow"> History </p> */}
-            </h2>
+            <h2>Transaction history</h2>
           </div>
         </div>
 
         <div className="transaction-list">
-          {filteredTransactions.length === 0 ? (
+          {transactionHistory.length === 0 ? (
             <div className="empty-state">No transactions yet.</div>
           ) : (
-            filteredTransactions.map((tx) => (
-              <button
-                key={tx.id}
-                type="button"
-                className="transaction-item transaction-row"
-                onClick={() => openTransactionDetail(tx)}
-              >
-                <div className={`transaction-icon ${tx.type}`}>
-                  {tx.type === 'income' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
-                </div>
-                <div className="transaction-copy">
-                  <strong>{tx.title}</strong>
-                  <span>{categoryMap[tx.categoryId]?.name || 'Category'} · {paymentMap[tx.paymentMethodId]?.name || 'Method'}</span>
-                </div>
-                <div className="transaction-meta align-right">
-                  <strong className={tx.type}>{tx.type === 'income' ? '+' : '-'}{formatCurrency(Number(tx.amount || 0))}</strong>
-                  <span>{new Date(tx.date).toLocaleDateString('en-PK')}</span>
-                </div>
-              </button>
-            ))
+            transactionHistory.map(renderHistoryItem)
           )}
         </div>
       </section>
@@ -457,39 +719,20 @@ function App() {
         <button type="button" className="back-button" onClick={() => setTab(editingTransactionId ? 'transactions' : 'home')} aria-label={editingTransactionId ? 'Back to transactions' : 'Back to home'}>
           <ArrowLeft size={20} />
         </button>
-        <h1>{editingTransactionId ? 'Edit Transaction' : 'Add Transaction'}</h1>
+        <h1>{editingTransactionId ? 'Edit Expense' : 'Add Expense'}</h1>
       </header>
 
       <section className="add-transaction-content">
-        <div className="transaction-type-control" aria-label="Transaction type">
-          <button
-            type="button"
-            className={form.type === 'income' ? 'active' : ''}
-            onClick={() => setForm((current) => ({ ...current, type: 'income', categoryId: categories.find((category) => category.type === 'income')?.id || current.categoryId }))}
-            >Income
-          </button>
-          <button
-            type="button"
-            className={form.type === 'expense' ? 'active' : ''}
-            onClick={() => setForm((current) => ({ ...current, type: 'expense', categoryId: categories.find((category) => category.name === 'Other')?.id || current.categoryId }))}
-            >Expense
-          </button>
-        </div>
-
         <form className="transaction-form" onSubmit={handleSubmit}>
           <label htmlFor="transaction-amount">Amount (PKR)</label>
           <input id="transaction-amount" name="amount" type="number" step="0.01" min="0.01" value={form.amount} onChange={handleInputChange} placeholder="Rs0" />
 
-          {form.type === 'expense' ? (
-            <>
-              <label htmlFor="transaction-category">Category</label>
-              <select id="transaction-category" name="categoryId" value={form.categoryId} onChange={handleInputChange}>
-                {categories.filter((category) => category.type === 'expense').map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
-            </>
-          ) : null}
+          <label htmlFor="transaction-category">Category</label>
+          <select id="transaction-category" name="categoryId" value={form.categoryId} onChange={handleInputChange}>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>{category.name}</option>
+            ))}
+          </select>
 
           <label htmlFor="transaction-title">Description</label>
           <input id="transaction-title" name="title" value={form.title} onChange={handleInputChange} placeholder="Description" />
@@ -505,7 +748,7 @@ function App() {
           <input id="transaction-date" name="date" type="date" value={form.date} onChange={handleInputChange} />
 
           <button className="primary-action full transaction-save-button" type="submit">
-            {editingTransactionId ? 'Save Changes' : 'Save Transaction'}
+            {editingTransactionId ? 'Save Changes' : 'Save Expense'}
           </button>
         </form>
 
@@ -521,7 +764,6 @@ function App() {
       ...initialForm,
       title: selectedTransaction.title || '',
       amount: String(selectedTransaction.amount || ''),
-      type: selectedTransaction.type || 'expense',
       categoryId: selectedTransaction.categoryId,
       paymentMethodId: selectedTransaction.paymentMethodId,
       date: selectedTransaction.date || new Date().toISOString().slice(0, 10),
@@ -532,9 +774,124 @@ function App() {
 
   const renderTransactionDetail = () => {
     if (!selectedTransaction) return null;
+    if (selectedTransaction.historyType === 'budget') {
+      const date = new Date(`${selectedTransaction.date}T00:00:00`);
+      const time = selectedTransaction.createdAt
+        ? new Date(selectedTransaction.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })
+        : '—';
+      const isBudgetAddition = selectedTransaction.entryType === 'addition';
+      const budgetLabel = !selectedTransaction.categoryId || selectedTransaction.categoryId === 'overall'
+        ? 'Overall budget'
+        : `${categoryMap[selectedTransaction.categoryId]?.name || 'Category'} budget`;
+
+      return (
+        <main className="detail-shell">
+          <header className="add-transaction-header">
+            <button
+              type="button"
+              className="back-button"
+              onClick={() => setTab(selectedTransaction.returnTab || 'transactions')}
+              aria-label="Back to budget history"
+            >
+              <ArrowLeft size={22} />
+            </button>
+            <h1>Budget Entry</h1>
+          </header>
+
+          <section className="detail-content">
+            <div className="detail-summary">
+              <span className="detail-icon budget-change"><WalletCards size={26} strokeWidth={1.7} /></span>
+              <h2>{budgetLabel}</h2>
+              <strong className="budget-change-value">
+                {!isBudgetAddition && selectedTransaction.amount === null
+                  ? 'Removed'
+                  : formatCurrency(fromPaisa(selectedTransaction.amount))}
+              </strong>
+              <p>
+                {isBudgetAddition
+                  ? 'Added to your overall budget'
+                  : selectedTransaction.amount === null
+                    ? 'Budget limit removed'
+                    : selectedTransaction.previousAmount === null
+                      ? 'Budget limit set'
+                      : 'Budget limit updated'}
+              </p>
+            </div>
+
+            <section className="detail-card">
+              <div><span>Date</span><strong>{date.toLocaleDateString('en-PK')}</strong></div>
+              <div><span>Time</span><strong>{time}</strong></div>
+              {isBudgetAddition ? (
+                <>
+                  <div>
+                    <span>Balance before</span>
+                    <strong>{formatCurrency(fromPaisa(selectedTransaction.previousAmount || 0))}</strong>
+                  </div>
+                  <div>
+                    <span>Amount added</span>
+                    <strong>{formatCurrency(fromPaisa(selectedTransaction.amount))}</strong>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <span>Previous limit</span>
+                    <strong>{selectedTransaction.previousAmount === null ? 'Not set' : formatCurrency(fromPaisa(selectedTransaction.previousAmount))}</strong>
+                  </div>
+                  <div>
+                    <span>New limit</span>
+                    <strong>{selectedTransaction.amount === null ? 'Not set' : formatCurrency(fromPaisa(selectedTransaction.amount))}</strong>
+                  </div>
+                </>
+              )}
+              {selectedTransaction.description ? (
+                <div><span>Description</span><strong>{selectedTransaction.description}</strong></div>
+              ) : null}
+            </section>
+
+            <div className="detail-actions">
+              {selectedTransaction.amount !== null ? (
+                <button
+                  type="button"
+                  className="detail-edit-button"
+                  onClick={() => openBudgetHistoryEditor(selectedTransaction)}
+                >
+                  Edit
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="detail-delete-button"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                <Trash2 size={17} /> Delete
+              </button>
+            </div>
+          </section>
+
+          {showDeleteConfirm && (
+            <div className="delete-overlay" role="presentation">
+              <section className="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-budget-title">
+                <h2 id="delete-budget-title">Delete Budget History?</h2>
+                <p>
+                  {isBudgetAddition
+                    ? 'This budget addition will be removed from your total balance.'
+                    : 'This change will be removed and the previous budget value restored.'}
+                </p>
+                <div className="delete-dialog-actions">
+                  <button type="button" className="dialog-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+                  <button type="button" className="dialog-delete" onClick={handleDelete}><Trash2 size={17} /> Delete</button>
+                </div>
+              </section>
+            </div>
+          )}
+        </main>
+      );
+    }
+
     const categoryName = categoryMap[selectedTransaction.categoryId]?.name || 'Other';
     const methodName = paymentMap[selectedTransaction.paymentMethodId]?.name || 'Other';
-    const date = new Date(selectedTransaction.date);
+    const date = new Date(`${selectedTransaction.date}T00:00:00`);
 
     return (
       <main className="detail-shell">
@@ -547,10 +904,10 @@ function App() {
 
         <section className="detail-content">
           <div className="detail-summary">
-            <span className={`detail-icon ${selectedTransaction.type}`}><Utensils size={26} strokeWidth={1.7} /></span>
+            <span className="detail-icon expense"><Utensils size={26} strokeWidth={1.7} /></span>
             <h2>{categoryName}</h2>
-            <strong className={selectedTransaction.type}>{selectedTransaction.type === 'income' ? '+' : '-'} {formatCurrency(Number(selectedTransaction.amount || 0))}</strong>
-            <p>{selectedTransaction.type === 'income' ? 'Income' : 'Expense'}</p>
+            <strong className="expense">- {formatCurrency(Number(selectedTransaction.amount || 0))}</strong>
+            <p>Expense</p>
           </div>
 
           <section className="detail-card">
@@ -595,16 +952,8 @@ function App() {
 
         <div className="metric-grid">
           <div className="metric-card">
-            <span>Income</span>
-            <strong>{formatCurrency(monthlySummary.income)}</strong>
-          </div>
-          <div className="metric-card">
-            <span>Expense</span>
-            <strong>{formatCurrency(monthlySummary.expense)}</strong>
-          </div>
-          <div className="metric-card accent">
-            <span>Balance</span>
-            <strong>{formatCurrency(monthlySummary.balance)}</strong>
+            <span>Expenses this month</span>
+            <strong>{formatCurrency(monthlyExpense)}</strong>
           </div>
         </div>
       </section>
@@ -633,14 +982,198 @@ function App() {
     </div>
   );
 
-  const renderBudget = () => (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Budget</h2>
+  const renderBudget = () => {
+    const overallBudget = fromPaisa(totalBudgetPaisa);
+    const totalSpent = calculateExpenseTotal(transactions);
+    const remainingBalance = overallBudget - totalSpent;
+    const spendingPercent = overallBudget > 0 ? (totalSpent / overallBudget) * 100 : 0;
+    const sortedBudgetHistory = [...budgetHistory]
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+    return (
+      <div className="stacked-blocks">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Overall budget</p>
+              <h2>Add to budget</h2>
+            </div>
+          </div>
+
+          <form className="budget-form" onSubmit={handleSaveBudget}>
+            <div className="budget-entry-box">
+              <label htmlFor="budget-date">Date</label>
+              <input
+                id="budget-date"
+                name="date"
+                type="date"
+                value={budgetForm.date}
+                onChange={handleBudgetFormChange}
+                required
+              />
+
+              <label htmlFor="budget-amount">Amount (PKR)</label>
+              <input
+                id="budget-amount"
+                name="amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
+                placeholder="Rs0"
+                value={budgetForm.amount}
+                onChange={handleBudgetFormChange}
+                required
+              />
+
+              <label htmlFor="budget-description">Description (optional)</label>
+              <textarea
+                id="budget-description"
+                name="description"
+                value={budgetForm.description}
+                onChange={handleBudgetFormChange}
+                placeholder="Add a note"
+                rows="3"
+              />
+            </div>
+
+            {status.message ? (
+              <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
+                {status.message}
+              </p>
+            ) : null}
+
+            <button className="primary-action full" type="submit">
+              {editingBudgetHistoryId ? 'Update Budget' : 'Save Budget'}
+            </button>
+            {editingBudgetHistoryId ? (
+              <button
+                className="secondary-button wide"
+                type="button"
+                onClick={() => {
+                  setEditingBudgetHistoryId(null);
+                  setBudgetForm({ date: getLocalDateString(), amount: '', description: '' });
+                  setSelectedTransaction(null);
+                  setStatus({ type: 'idle', message: '' });
+                }}
+              >
+                Cancel editing
+              </button>
+            ) : null}
+          </form>
+
+          <section className="budget-overall-summary">
+            <h3 className="budget-section-title">Total budget balance</h3>
+            <div className="budget-summary">
+              <div className="budget-summary-item">
+                <span>Total budget</span>
+                <strong>{formatCurrency(overallBudget)}</strong>
+              </div>
+              <div className="budget-summary-item">
+                <span>Total expenses</span>
+                <strong>{formatCurrency(totalSpent)}</strong>
+              </div>
+              <div className="budget-summary-item">
+                <span>{remainingBalance < 0 ? 'Spent over budget' : 'Available balance'}</span>
+                <strong className={remainingBalance < 0 ? 'expense' : ''}>
+                  {formatCurrency(Math.abs(remainingBalance))}
+                </strong>
+              </div>
+            </div>
+
+            <div
+              className={`budget-progress${remainingBalance < 0 ? ' over-budget' : ''}`}
+              role="progressbar"
+              aria-label="Overall budget spent"
+              aria-valuemin="0"
+              aria-valuemax={overallBudget || undefined}
+              aria-valuenow={overallBudget ? Math.min(totalSpent, overallBudget) : totalSpent}
+              aria-valuetext={`${Math.round(spendingPercent)}% used`}
+            >
+              <span style={{ width: `${Math.min(spendingPercent, 100)}%` }} />
+            </div>
+          </section>
+        </section>
+
+        <section className="panel budget-history-panel">
+          <div className="panel-header">
+            <h2>Budget history</h2>
+          </div>
+          <div className="budget-history-list">
+            {sortedBudgetHistory.length === 0 ? (
+              <div className="empty-state">No budget history yet.</div>
+            ) : (
+              sortedBudgetHistory.map((entry) => {
+                const isBudgetAddition = entry.entryType === 'addition';
+                const previousAmount = entry.previousAmount === null || entry.previousAmount === undefined
+                  ? 'Not set'
+                  : formatCurrency(fromPaisa(entry.previousAmount));
+                const amount = entry.amount === null
+                  ? 'Removed'
+                  : formatCurrency(fromPaisa(entry.amount));
+
+                return (
+                  <article className="budget-history-entry" key={entry.id}>
+                    <div className="budget-history-heading">
+                      <strong>{isBudgetAddition ? 'Budget added' : 'Previous budget entry'}</strong>
+                      <span>{entry.amount === null ? 'Removed' : isBudgetAddition ? 'Added' : entry.previousAmount === null ? 'Set' : 'Updated'}</span>
+                    </div>
+                    <p className="budget-history-amount">
+                      {isBudgetAddition ? `+${amount}` : <>{previousAmount} <span aria-hidden="true">→</span> {amount}</>}
+                    </p>
+                    <time dateTime={entry.createdAt}>
+                      {new Date(`${entry.date}T00:00:00`).toLocaleDateString('en-PK', { dateStyle: 'medium' })}
+                      {' · '}
+                      {new Date(entry.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                    </time>
+                    {entry.description ? <p className="budget-history-description">{entry.description}</p> : null}
+                    <div className="budget-history-actions">
+                      {entry.amount !== null ? (
+                        <button
+                          type="button"
+                          className="detail-edit-button"
+                          onClick={() => openBudgetHistoryEditor(entry)}
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="detail-delete-button"
+                        onClick={() => {
+                          setSelectedTransaction({ ...entry, historyType: 'budget', returnTab: 'budget' });
+                          setShowDeleteConfirm(true);
+                        }}
+                      >
+                        <Trash2 size={16} /> Delete
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        {showDeleteConfirm && selectedTransaction?.historyType === 'budget' && selectedTransaction.returnTab === 'budget' ? (
+          <div className="delete-overlay" role="presentation">
+            <section className="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-budget-history-title">
+              <h2 id="delete-budget-history-title">Delete Budget History?</h2>
+              <p>
+                {selectedTransaction.entryType === 'addition'
+                  ? 'This budget addition will be removed from your total balance.'
+                  : 'This previous budget entry will be removed.'}
+              </p>
+              <div className="delete-dialog-actions">
+                <button type="button" className="dialog-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+                <button type="button" className="dialog-delete" onClick={handleDelete}><Trash2 size={17} /> Delete</button>
+              </div>
+            </section>
+          </div>
+        ) : null}
       </div>
-      <div className="empty-state">No budget data.</div>
-    </section>
-  );
+    );
+  };
 
   const renderMore = () => (
     <div className="stacked-blocks">
@@ -798,17 +1331,19 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <h1>{tab === 'transactions' ? 'Transactions' : tab === 'analytics' ? 'Analytics' : tab === 'budget' ? 'Budget' : tab === 'more' ? 'More' : 'Home'}</h1>
-        <div className="topbar-actions">
-          <button
-            type="button"
-            className={tab === 'more' ? 'more-button active' : 'more-button'}
-            onClick={() => setTab('more')}
-            aria-label="More options"
-            title="More"
-          >
-            <Ellipsis size={22} />
-          </button>
-        </div>
+        {tab === 'home' ? (
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="more-button"
+              onClick={() => setTab('more')}
+              aria-label="More options"
+              title="More"
+            >
+              <Ellipsis size={22} />
+            </button>
+          </div>
+        ) : null}
       </header>
 
       <main className="content">
@@ -826,6 +1361,7 @@ function App() {
             type="button"
             className={tab === name ? 'nav-item active' : 'nav-item'}
             onClick={() => setTab(name)}
+            aria-current={tab === name ? 'page' : undefined}
           >
             <span className="nav-icon" aria-hidden="true">
               {name === 'home' && <House size={20} strokeWidth={1.9} />}

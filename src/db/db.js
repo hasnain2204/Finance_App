@@ -11,6 +11,47 @@ db.version(1).stores({
   preferences: 'id'
 });
 
+db.version(2).stores({
+  transactions: '++id, type, categoryId, paymentMethodId, date, amount, title',
+  categories: 'id, name, type',
+  paymentMethods: 'id, name',
+  budgets: 'id, categoryId, month',
+  preferences: 'id'
+}).upgrade(async (transaction) => {
+  await transaction.table('transactions').where('type').equals('income').delete();
+  await transaction.table('categories').where('type').equals('income').delete();
+  const expenseCategoryIds = new Set(
+    await transaction.table('categories').where('type').equals('expense').primaryKeys()
+  );
+  const existingBudgets = await transaction.table('budgets').toArray();
+  await transaction.table('budgets').clear();
+  const migratedBudgets = existingBudgets
+    .filter((budget) => budget.categoryId === 'overall' || expenseCategoryIds.has(budget.categoryId))
+    .map((budget) => ({
+      ...budget,
+      amount: Math.round(Number(budget.amount || 0) * 100)
+    }));
+  if (migratedBudgets.length) await transaction.table('budgets').bulkPut(migratedBudgets);
+});
+
+db.version(3).stores({
+  transactions: '++id, type, categoryId, paymentMethodId, date, amount, title',
+  categories: 'id, name, type',
+  paymentMethods: 'id, name',
+  budgets: 'id, categoryId, month',
+  budgetHistory: '++id, month, date, createdAt',
+  preferences: 'id'
+});
+
+db.version(4).stores({
+  transactions: '++id, type, categoryId, paymentMethodId, date, amount, title',
+  categories: 'id, name, type',
+  paymentMethods: 'id, name',
+  budgets: 'id, categoryId, month',
+  budgetHistory: '++id, month, categoryId, date, createdAt',
+  preferences: 'id'
+});
+
 export async function seedDatabase() {
   const categoryCount = await db.categories.count();
   const paymentCount = await db.paymentMethods.count();
@@ -29,10 +70,12 @@ export async function seedDatabase() {
 }
 
 export async function resetDatabase() {
-  await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.preferences, async () => {
+  await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.budgets, db.budgetHistory, db.preferences, async () => {
     await db.transactions.clear();
     await db.categories.clear();
     await db.paymentMethods.clear();
+    await db.budgets.clear();
+    await db.budgetHistory.clear();
     await db.preferences.clear();
   });
 

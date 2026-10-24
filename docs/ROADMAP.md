@@ -8,7 +8,7 @@
 
 ## Current findings
 - A React/Vite PWA is implemented with local Dexie/IndexedDB storage and core transaction flows.
-- Dashboard and monthly-summary analytics are present, but budgets remain a placeholder and reporting is incomplete.
+- Expense-only dashboard and monthly-summary analytics are present; a cumulative overall budget balance is implemented.
 - Category/payment-method management and JSON backup/restore are present; settings/support flows are not complete.
 - The Figma section link returned HTTP 403 from this environment, so visual parity and the full screen inventory remain unverified.
 - Automated tests currently cover finance utilities only; UI, database, restore, and offline behavior lack coverage.
@@ -46,11 +46,11 @@ Status: Early implementation in progress
 
 ### Implemented
 - Local persistence, first-run onboarding, dashboard, transaction CRUD, and monthly totals
+- Cumulative overall budget additions
 - Category/payment-method management and JSON backup/restore
 - PWA build configuration
 
 ### Remaining
-- Implement or explicitly remove budget planning from V1 scope.
 - Complete weekly/monthly/category analytics, settings, and support requirements.
 - Add UI/database/backup/offline tests and verify install/offline behavior.
 - Review visual parity after Figma access is available.
