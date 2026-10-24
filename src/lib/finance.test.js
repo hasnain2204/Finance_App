@@ -10,6 +10,7 @@ import {
   createBudgetHistoryEntry,
   buildBackupPayload,
   getLocalDateString,
+  formatDate,
   validateTransaction
 } from './finance';
 
@@ -124,6 +125,14 @@ describe('finance utilities', () => {
 
   it('formats dates using the local calendar date', () => {
     expect(getLocalDateString(new Date(2026, 9, 24, 0, 30))).toBe('2026-10-24');
+  });
+
+  it('formats dates using the selected display format', () => {
+    const date = '2026-10-03';
+    expect(formatDate(date, 'DD MMM YYYY')).toBe('03 Oct 2026');
+    expect(formatDate(date, 'DD/MM/YYYY')).toBe('03/10/2026');
+    expect(formatDate(date, 'MM/DD/YYYY')).toBe('10/03/2026');
+    expect(formatDate(date, 'YYYY-MM-DD')).toBe('2026-10-03');
   });
 
   it('rejects transactions with missing or invalid dates', () => {

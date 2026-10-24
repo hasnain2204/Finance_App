@@ -65,7 +65,13 @@ export async function seedDatabase() {
 
   const prefsCount = await db.preferences.count();
   if (prefsCount === 0) {
-    await db.preferences.put({ id: 'app', currency: 'PKR', lightMode: true });
+    await db.preferences.put({
+      id: 'app',
+      currency: 'PKR',
+      lightMode: true,
+      dateFormat: 'DD MMM YYYY',
+      notificationsEnabled: false
+    });
   }
 }
 

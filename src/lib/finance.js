@@ -14,6 +14,34 @@ export function getLocalDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+export const dateFormatOptions = ['DD MMM YYYY', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'];
+
+export function formatDate(value, dateFormat = 'DD MMM YYYY') {
+  if (value === null || value === undefined || value === '') return '';
+  const date = value instanceof Date
+    ? value
+    : /^\d{4}-\d{2}-\d{2}$/.test(String(value))
+      ? new Date(`${value}T00:00:00`)
+      : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const monthName = date.toLocaleDateString('en-GB', { month: 'short' });
+  const year = String(date.getFullYear());
+
+  switch (dateFormatOptions.includes(dateFormat) ? dateFormat : 'DD MMM YYYY') {
+    case 'DD/MM/YYYY':
+      return `${day}/${month}/${year}`;
+    case 'MM/DD/YYYY':
+      return `${month}/${day}/${year}`;
+    case 'YYYY-MM-DD':
+      return `${year}-${month}-${day}`;
+    default:
+      return `${day} ${monthName} ${year}`;
+  }
+}
+
 export function formatCurrency(value) {
   const numericValue = Number(value || 0);
   const formatted = new Intl.NumberFormat('en-PK', {

@@ -3,10 +3,14 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   ArrowUpRight,
+  CircleAlert,
   ChartNoAxesCombined,
+  ChevronRight,
   Download,
   Ellipsis,
+  FileUp,
   House,
+  Pencil,
   Plus,
   ShieldCheck,
   Trash2,
@@ -23,6 +27,8 @@ import {
   calculateCategoryExpenseTotals,
   calculateExpenseTotal,
   createBudgetHistoryEntry,
+  dateFormatOptions,
+  formatDate,
   formatCurrency,
   fromPaisa,
   getLocalDateString,
@@ -34,12 +40,13 @@ const initialForm = {
   title: '',
   amount: '',
   categoryId: defaultCategories.find((category) => category.name === 'Other')?.id || defaultCategories[0].id,
-  paymentMethodId: defaultPaymentMethods.find((method) => method.name === 'Other')?.id || defaultPaymentMethods[0].id,
+  paymentMethodId: defaultPaymentMethods.find((method) => method.name === 'Cash')?.id || defaultPaymentMethods[0].id,
   date: getLocalDateString(),
   notes: ''
 };
 
 const navItems = ['home', 'transactions', 'analytics', 'budget'];
+const budgetCategories = ['Salary', 'Freelance', 'Other'];
 
 function App() {
   const [tab, setTab] = useState('home');
@@ -50,6 +57,7 @@ function App() {
   const [budgets, setBudgets] = useState([]);
   const [budgetForm, setBudgetForm] = useState({
     date: getLocalDateString(),
+    budgetCategory: 'Salary',
     amount: '',
     description: ''
   });
@@ -59,12 +67,31 @@ function App() {
   const [categoryInput, setCategoryInput] = useState('');
   const [methodInput, setMethodInput] = useState('');
   const [preferences, setPreferences] = useState(null);
+  const [preferenceDateFormatDraft, setPreferenceDateFormatDraft] = useState('DD MMM YYYY');
+  const [preferenceNotificationsDraft, setPreferenceNotificationsDraft] = useState(false);
+  const [preferenceSaveStatus, setPreferenceSaveStatus] = useState({ type: 'idle', message: '' });
   const [onboardingName, setOnboardingName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [editingTransactionId, setEditingTransactionId] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [focusBudgetAnalysis, setFocusBudgetAnalysis] = useState(false);
+  const [showAddCategoryForm, setShowAddCategoryForm] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [categoryNameDraft, setCategoryNameDraft] = useState('');
+  const [categoryEditStatus, setCategoryEditStatus] = useState({ type: 'idle', message: '' });
+  const [categoryToDelete, setCategoryToDelete] = useState(null);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState(null);
+  const [paymentMethodNameDraft, setPaymentMethodNameDraft] = useState('');
+  const [paymentMethodEditStatus, setPaymentMethodEditStatus] = useState({ type: 'idle', message: '' });
+  const [paymentMethodToDelete, setPaymentMethodToDelete] = useState(null);
+  const [showAddPaymentMethodForm, setShowAddPaymentMethodForm] = useState(false);
+  const [restoreCandidate, setRestoreCandidate] = useState(null);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+  const [isPreparingRestore, setIsPreparingRestore] = useState(false);
   const fileInputRef = useRef(null);
+  const budgetFormRef = useRef(null);
+  const budgetAnalysisRef = useRef(null);
 
   const categoryMap = useMemo(
     () => Object.fromEntries(categories.map((category) => [category.id, category])),
@@ -151,7 +178,18 @@ function App() {
       setCategories(allCategories.filter((category) => category.type === 'expense'));
       setPaymentMethods(allMethods.length ? allMethods : defaultPaymentMethods);
       setBudgets(allBudgets);
-      setPreferences(appPreferences || { id: 'app', currency: 'PKR', lightMode: true });
+      setPreferences({
+        id: 'app',
+        currency: 'PKR',
+        lightMode: true,
+        dateFormat: 'DD MMM YYYY',
+        notificationsEnabled: false,
+        ...(appPreferences || {}),
+        dateFormat: dateFormatOptions.includes(appPreferences?.dateFormat)
+          ? appPreferences.dateFormat
+          : 'DD MMM YYYY',
+        notificationsEnabled: Boolean(appPreferences?.notificationsEnabled)
+      });
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
     }
@@ -160,6 +198,12 @@ function App() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (tab !== 'analytics' || !focusBudgetAnalysis) return;
+    budgetAnalysisRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setFocusBudgetAnalysis(false);
+  }, [tab, focusBudgetAnalysis]);
 
   const handleContinueOnboarding = async () => {
     const nextPreferences = {
@@ -174,6 +218,29 @@ function App() {
       new Promise((resolve) => window.setTimeout(resolve, 1150))
     ]);
     setPreferences(nextPreferences);
+  };
+
+  const openPreferences = () => {
+    setPreferenceDateFormatDraft(preferences?.dateFormat || 'DD MMM YYYY');
+    setPreferenceNotificationsDraft(Boolean(preferences?.notificationsEnabled));
+    setPreferenceSaveStatus({ type: 'idle', message: '' });
+    setTab('preferences');
+  };
+
+  const handleSavePreferences = async (event) => {
+    event.preventDefault();
+    const nextPreferences = {
+      ...(preferences || { id: 'app', currency: 'PKR', lightMode: true }),
+      dateFormat: preferenceDateFormatDraft,
+      notificationsEnabled: preferenceNotificationsDraft
+    };
+    try {
+      await db.preferences.put(nextPreferences);
+      setPreferences(nextPreferences);
+      setPreferenceSaveStatus({ type: 'success', message: 'Preferences saved.' });
+    } catch (error) {
+      setPreferenceSaveStatus({ type: 'error', message: 'Could not save preferences. Please try again.' });
+    }
   };
 
   const handleInputChange = (event) => {
@@ -215,7 +282,7 @@ function App() {
 
   const handleSaveBudget = async (event) => {
     event.preventDefault();
-    const { date, amount, description } = budgetForm;
+    const { date, budgetCategory, amount, description } = budgetForm;
     const numericAmount = Number(amount);
     const parsedDate = new Date(`${date}T00:00:00`);
     const amountIsValid = (
@@ -293,6 +360,7 @@ function App() {
                 month,
                 categoryId: 'overall',
                 date,
+                budgetCategory,
                 previousAmount: entryTotal,
                 amount: paisaAmount,
                 description: description.trim(),
@@ -301,6 +369,7 @@ function App() {
               }
             : {
                 ...createBudgetHistoryEntry(month, 'overall', currentTotal, paisaAmount, description, date, timestamp),
+                budgetCategory,
                 entryType: 'addition'
               };
           await db.budgetHistory[existingHistory ? 'put' : 'add'](historyEntry);
@@ -314,7 +383,7 @@ function App() {
       });
       await loadData();
       setEditingBudgetHistoryId(null);
-      setBudgetForm({ date: getLocalDateString(), amount: '', description: '' });
+      setBudgetForm({ date: getLocalDateString(), budgetCategory: 'Salary', amount: '', description: '' });
       setSelectedTransaction(null);
       setStatus({ type: 'success', message: 'Budget saved.' });
     } catch (error) {
@@ -326,11 +395,15 @@ function App() {
     setEditingBudgetHistoryId(entry.id);
     setBudgetForm({
       date: entry.date,
+      budgetCategory: entry.budgetCategory || 'Other',
       amount: entry.amount === null ? '' : String(fromPaisa(entry.amount)),
       description: entry.description || ''
     });
     setStatus({ type: 'idle', message: '' });
     setTab('budget');
+    requestAnimationFrame(() => {
+      budgetFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   const handleSubmit = async (event) => {
@@ -342,17 +415,14 @@ function App() {
       return;
     }
 
-    const highestNumber = transactions.reduce((highest, tx) => {
-      const match = String(tx.title || '').match(/^Expense(\d+)$/i);
-      return match ? Math.max(highest, Number(match[1])) : highest;
-    }, 0);
-    const defaultTitle = `Expense${highestNumber + 1}`;
+    const defaultCategoryId = categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
+    const defaultPaymentMethodId = paymentMethods.find((method) => method.name === 'Cash')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
     const nextPayload = {
-      title: form.title.trim() || defaultTitle,
+      title: form.title.trim(),
       amount: toPaisa(Number(form.amount)),
       type: 'expense',
-      categoryId: form.categoryId,
-      paymentMethodId: form.paymentMethodId,
+      categoryId: form.categoryId || defaultCategoryId,
+      paymentMethodId: form.paymentMethodId || defaultPaymentMethodId,
       date: form.date,
       notes: form.notes.trim(),
       createdAt: new Date().toISOString()
@@ -366,7 +436,7 @@ function App() {
     setForm({
       ...initialForm,
       categoryId: categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id,
-      paymentMethodId: paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id
+      paymentMethodId: paymentMethods.find((method) => method.name === 'Cash')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id
     });
     setStatus({ type: 'idle', message: '' });
     setEditingTransactionId(null);
@@ -414,45 +484,256 @@ function App() {
 
   const handleAddCategory = async () => {
     const trimmed = categoryInput.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setCategoryEditStatus({ type: 'error', message: 'Enter a category name.' });
+      return;
+    }
+    if (categories.some((category) => category.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) {
+      setCategoryEditStatus({ type: 'error', message: 'A category with this name already exists.' });
+      return;
+    }
 
-    await db.categories.put({
-      id: `cat-${Date.now()}`,
-      name: trimmed,
-      type: 'expense'
-    });
-    setCategoryInput('');
-    loadData();
+    const category = { id: `cat-${Date.now()}`, name: trimmed, type: 'expense' };
+    try {
+      await db.categories.put(category);
+      setCategories((current) => [...current, category]);
+      setCategoryInput('');
+      setShowAddCategoryForm(false);
+      setCategoryEditStatus({ type: 'success', message: 'Category added.' });
+    } catch (error) {
+      setCategoryEditStatus({ type: 'error', message: 'Could not add the category. Please try again.' });
+    }
   };
 
   const handleAddMethod = async () => {
     const trimmed = methodInput.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'Enter a payment method name.' });
+      return;
+    }
+    if (paymentMethods.some((method) => method.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'A payment method with this name already exists.' });
+      return;
+    }
 
-    await db.paymentMethods.put({
+    const method = {
       id: `pm-${Date.now()}`,
       name: trimmed
-    });
+    };
+    try {
+      await db.paymentMethods.put(method);
+      setPaymentMethods((current) => [...current, method].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedPaymentMethodId(method.id);
+      setPaymentMethodNameDraft(method.name);
+      setMethodInput('');
+      setShowAddPaymentMethodForm(false);
+      setPaymentMethodEditStatus({ type: 'success', message: 'Payment method added.' });
+    } catch (error) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'Could not add the payment method. Please try again.' });
+    }
+  };
+
+  const openAccount = (category = categories[0]) => {
+    setSelectedCategoryId(category?.id || null);
+    setCategoryNameDraft(category?.name || '');
+    setShowAddCategoryForm(false);
+    setCategoryEditStatus({ type: 'idle', message: '' });
+    setTab('account');
+  };
+
+  const openPaymentMethods = (method = paymentMethods[0]) => {
+    setSelectedPaymentMethodId(method?.id || null);
+    setPaymentMethodNameDraft(method?.name || '');
+    setShowAddPaymentMethodForm(false);
     setMethodInput('');
-    loadData();
+    setPaymentMethodEditStatus({ type: 'idle', message: '' });
+    setTab('payment-methods');
+  };
+
+  const handleSelectPaymentMethod = (method) => {
+    setSelectedPaymentMethodId(method.id);
+    setPaymentMethodNameDraft(method.name);
+    setPaymentMethodEditStatus({ type: 'idle', message: '' });
+  };
+
+  const handleSavePaymentMethod = async (event) => {
+    event.preventDefault();
+    const methodName = paymentMethodNameDraft.trim();
+    if (!selectedPaymentMethodId || !methodName) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'Enter a payment method name before saving.' });
+      return;
+    }
+    if (paymentMethods.some((method) => (
+      method.id !== selectedPaymentMethodId &&
+      method.name.toLocaleLowerCase() === methodName.toLocaleLowerCase()
+    ))) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'A payment method with this name already exists.' });
+      return;
+    }
+
+    try {
+      const updated = await db.paymentMethods.update(selectedPaymentMethodId, { name: methodName });
+      if (!updated) {
+        setPaymentMethodEditStatus({ type: 'error', message: 'This payment method no longer exists. Reopen Payment Methods to refresh the list.' });
+        return;
+      }
+      setPaymentMethods((current) => current
+        .map((method) => method.id === selectedPaymentMethodId ? { ...method, name: methodName } : method)
+        .sort((a, b) => a.name.localeCompare(b.name)));
+      setPaymentMethodEditStatus({ type: 'success', message: 'Payment method updated.' });
+    } catch (error) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'Could not update the payment method. Please try again.' });
+    }
+  };
+
+  const handleDeletePaymentMethod = async () => {
+    if (!paymentMethodToDelete) return;
+    if (paymentMethods.length <= 1) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'At least one payment method must remain.' });
+      setPaymentMethodToDelete(null);
+      return;
+    }
+
+    try {
+      let isInUse = false;
+      await db.transaction('rw', db.paymentMethods, db.transactions, async () => {
+        const transaction = await db.transactions.where('paymentMethodId').equals(paymentMethodToDelete.id).first();
+        if (transaction) {
+          isInUse = true;
+          return;
+        }
+        await db.paymentMethods.delete(paymentMethodToDelete.id);
+      });
+
+      if (isInUse) {
+        setPaymentMethodEditStatus({
+          type: 'error',
+          message: 'This payment method is used by existing transactions and cannot be removed.'
+        });
+        setPaymentMethodToDelete(null);
+        return;
+      }
+
+      const remainingMethods = paymentMethods.filter((method) => method.id !== paymentMethodToDelete.id);
+      setPaymentMethods(remainingMethods);
+      if (selectedPaymentMethodId === paymentMethodToDelete.id) {
+        const nextMethod = remainingMethods[0];
+        setSelectedPaymentMethodId(nextMethod?.id || null);
+        setPaymentMethodNameDraft(nextMethod?.name || '');
+      }
+      setPaymentMethodEditStatus({ type: 'success', message: 'Payment method removed.' });
+      setPaymentMethodToDelete(null);
+    } catch (error) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'Could not remove the payment method. Please try again.' });
+      setPaymentMethodToDelete(null);
+    }
+  };
+
+  const handleSelectCategory = (category) => {
+    setSelectedCategoryId(category.id);
+    setCategoryNameDraft(category.name);
+    setCategoryEditStatus({ type: 'idle', message: '' });
+  };
+
+  const handleSaveCategory = async (event) => {
+    event.preventDefault();
+    const categoryName = categoryNameDraft.trim();
+    if (!selectedCategoryId || !categoryName) {
+      setCategoryEditStatus({ type: 'error', message: 'Enter a category name before saving.' });
+      return;
+    }
+    if (categories.some((category) => (
+      category.id !== selectedCategoryId &&
+      category.name.toLocaleLowerCase() === categoryName.toLocaleLowerCase()
+    ))) {
+      setCategoryEditStatus({ type: 'error', message: 'A category with this name already exists.' });
+      return;
+    }
+
+    try {
+      const updated = await db.categories.update(selectedCategoryId, { name: categoryName });
+      if (!updated) {
+        setCategoryEditStatus({ type: 'error', message: 'This category no longer exists. Reopen Account to refresh the list.' });
+        return;
+      }
+      setCategories((current) => current.map((category) => (
+        category.id === selectedCategoryId ? { ...category, name: categoryName } : category
+      )));
+      setCategoryEditStatus({ type: 'success', message: 'Category updated.' });
+    } catch (error) {
+      setCategoryEditStatus({ type: 'error', message: 'Could not update the category. Please try again.' });
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+    if (categories.length <= 1) {
+      setCategoryEditStatus({ type: 'error', message: 'At least one category must remain.' });
+      setCategoryToDelete(null);
+      return;
+    }
+
+    try {
+      let isInUse = false;
+      await db.transaction('rw', db.categories, db.transactions, db.budgetHistory, db.budgets, async () => {
+        const [transaction, historyEntry, budget] = await Promise.all([
+          db.transactions.where('categoryId').equals(categoryToDelete.id).first(),
+          db.budgetHistory.where('categoryId').equals(categoryToDelete.id).first(),
+          db.budgets.where('categoryId').equals(categoryToDelete.id).first()
+        ]);
+        if (transaction || historyEntry || budget) {
+          isInUse = true;
+          return;
+        }
+        await db.categories.delete(categoryToDelete.id);
+      });
+
+      if (isInUse) {
+        setCategoryEditStatus({
+          type: 'error',
+          message: 'This category is used by existing records and cannot be removed.'
+        });
+        setCategoryToDelete(null);
+        return;
+      }
+
+      const remainingCategories = categories.filter((category) => category.id !== categoryToDelete.id);
+      setCategories(remainingCategories);
+      if (selectedCategoryId === categoryToDelete.id) {
+        const nextCategory = remainingCategories[0];
+        setSelectedCategoryId(nextCategory?.id || null);
+        setCategoryNameDraft(nextCategory?.name || '');
+      }
+      setCategoryEditStatus({ type: 'success', message: 'Category removed.' });
+      setCategoryToDelete(null);
+    } catch (error) {
+      setCategoryEditStatus({ type: 'error', message: 'Could not remove the category. Please try again.' });
+      setCategoryToDelete(null);
+    }
   };
 
   const handleExport = () => {
-    const payload = buildBackupPayload({ transactions, categories, paymentMethods, budgets, budgetHistory });
-    const blob = new Blob([payload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'pws-v1-backup.json';
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setStatus({ type: 'success', message: 'Backup exported successfully.' });
+    try {
+      const payload = buildBackupPayload({ transactions, categories, paymentMethods, budgets, budgetHistory });
+      const blob = new Blob([payload], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'pws-v1-backup.json';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setStatus({ type: 'success', message: 'Backup exported' });
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Could not export your backup. Please try again.' });
+    }
   };
 
-  const handleRestore = async (event) => {
+  const handleRestoreFileChange = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setRestoreCandidate(null);
+    setIsPreparingRestore(true);
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
@@ -490,6 +771,7 @@ function App() {
               typeof entry.createdAt !== 'string' ||
               Number.isNaN(new Date(entry.createdAt).getTime()) ||
               (entry.categoryId !== undefined && (typeof entry.categoryId !== 'string' || !entry.categoryId)) ||
+              (entry.budgetCategory !== undefined && (typeof entry.budgetCategory !== 'string' || !entry.budgetCategory)) ||
               (entry.description !== undefined && typeof entry.description !== 'string') ||
               !validAmount(entry.previousAmount) ||
               !validAmount(entry.amount)
@@ -500,6 +782,36 @@ function App() {
           })
         : [];
 
+      setRestoreCandidate({
+        fileName: file.name,
+        fileDate: formatDate(new Date(file.lastModified), preferences?.dateFormat),
+        parsed,
+        restoredCategories,
+        restoredTransactions,
+        restoredBudgets,
+        restoredBudgetHistory
+      });
+      setShowRestoreConfirm(true);
+      setStatus({ type: 'idle', message: '' });
+    } catch (error) {
+      setStatus({ type: 'error', message: 'The selected file is not a valid PWS backup.' });
+    } finally {
+      setIsPreparingRestore(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!restoreCandidate) return;
+    const {
+      parsed,
+      restoredCategories,
+      restoredTransactions,
+      restoredBudgets,
+      restoredBudgetHistory
+    } = restoreCandidate;
+
+    try {
       await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.budgets, db.budgetHistory, async () => {
         await db.transactions.clear();
         await db.categories.clear();
@@ -522,9 +834,9 @@ function App() {
           : 'Backup restored successfully.'
       });
     } catch (error) {
-      setStatus({ type: 'error', message: 'The selected file could not be restored.' });
+      setStatus({ type: 'error', message: 'Could not restore the selected backup. Your current data was not changed.' });
     } finally {
-      event.target.value = '';
+      setShowRestoreConfirm(false);
     }
   };
 
@@ -541,25 +853,30 @@ function App() {
     const budgetLabel = categoryId === 'overall'
       ? 'Overall budget'
       : `${categoryMap[categoryId]?.name || 'Category'} budget`;
+    const budgetCategory = isBudgetAddition ? entry.budgetCategory || 'Other' : budgetLabel;
     const title = isBudgetChange
       ? isBudgetAddition
-        ? 'Budget added'
+        ? budgetCategory
         : entry.amount === null
           ? `${budgetLabel} removed`
           : entry.previousAmount === null
             ? `${budgetLabel} set`
             : `${budgetLabel} updated`
       : entry.title;
+    const descriptionPreview = isBudgetChange && entry.description
+      ? entry.description.trim().replace(/\s+/g, ' ').split(' ').slice(0, 12).join(' ')
+      : '';
     const subtitle = isBudgetChange
-      ? isBudgetAddition
-        ? 'Added to overall budget'
-        : `${budgetLabel} · ${new Date(`${entry.month}-01T00:00:00`).toLocaleDateString('en-PK', { month: 'short', year: 'numeric' })}`
-      : `${categoryMap[entry.categoryId]?.name || 'Category'} · ${paymentMap[entry.paymentMethodId]?.name || 'Method'}`;
+      ? descriptionPreview || 'Budget updated'
+      : (() => {
+          const paymentMethodLabel = paymentMap[entry.paymentMethodId]?.name || 'Cash';
+          return entry.title ? `${paymentMethodLabel} · ${entry.title}` : paymentMethodLabel;
+        })();
     const amount = isBudgetChange
       ? entry.amount === null
         ? 'Removed'
         : formatCurrency(fromPaisa(entry.amount))
-      : `-${formatCurrency(Number(entry.amount || 0))}`;
+      : formatCurrency(Number(entry.amount || 0));
 
     return (
       <button
@@ -573,13 +890,12 @@ function App() {
           {isBudgetChange ? <WalletCards size={16} /> : <ArrowUpRight size={16} />}
         </div>
         <div className="transaction-copy">
-          <strong>{title}</strong>
+          <strong>{isBudgetChange ? title : categoryMap[entry.categoryId]?.name || 'Other'}</strong>
           <span>{subtitle}</span>
-          {isBudgetChange && entry.description ? <span>{entry.description}</span> : null}
         </div>
         <div className="transaction-meta align-right">
           <strong className={isBudgetChange ? 'budget-change-value' : 'expense'}>{amount}</strong>
-          <span>{new Date(`${entry.date}T00:00:00`).toLocaleDateString('en-PK')}</span>
+          <span>{formatDate(entry.date, preferences?.dateFormat)}</span>
         </div>
       </button>
     );
@@ -670,15 +986,12 @@ function App() {
   const openAddExpense = () => {
     setEditingTransactionId(null);
     setSelectedTransaction(null);
-    setForm((current) => {
-      const expenseCategory = categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
-      const otherMethod = paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
-
-      return {
-        ...initialForm,
-        categoryId: expenseCategory,
-        paymentMethodId: otherMethod
-      };
+    const expenseCategory = categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
+    const cashMethod = paymentMethods.find((method) => method.name === 'Cash')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
+    setForm({
+      ...initialForm,
+      categoryId: expenseCategory,
+      paymentMethodId: cashMethod
     });
     setTab('add-transaction');
   };
@@ -819,7 +1132,7 @@ function App() {
             </div>
 
             <section className="detail-card">
-              <div><span>Date</span><strong>{date.toLocaleDateString('en-PK')}</strong></div>
+              <div><span>Date</span><strong>{formatDate(date, preferences?.dateFormat)}</strong></div>
               <div><span>Time</span><strong>{time}</strong></div>
               {isBudgetAddition ? (
                 <>
@@ -911,7 +1224,7 @@ function App() {
           </div>
 
           <section className="detail-card">
-            <div><span>Date</span><strong>{date.toLocaleDateString('en-PK')}</strong></div>
+            <div><span>Date</span><strong>{formatDate(date, preferences?.dateFormat)}</strong></div>
             <div><span>Time</span><strong>{selectedTransaction.createdAt ? new Date(selectedTransaction.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '02:30 PM'}</strong></div>
             <div><span>Payment Method</span><strong>{methodName}</strong></div>
             <div><span>Description</span><strong>{selectedTransaction.title || 'No description'}</strong></div>
@@ -939,131 +1252,61 @@ function App() {
     );
   };
 
-  const renderAnalytics = () => (
-    <div className="stacked-blocks">
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Monthly</p>
-            <h2>Analytics</h2>
-          </div>
-          <TrendingUp size={18} />
-        </div>
-
-        <div className="metric-grid">
-          <div className="metric-card">
-            <span>Expenses this month</span>
-            <strong>{formatCurrency(monthlyExpense)}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Categories</p>
-            <h2>Top spending</h2>
-          </div>
-        </div>
-
-        <div className="category-list">
-          {categoryTotals.length === 0 ? (
-            <div className="empty-state">No expense data is available yet.</div>
-          ) : (
-            categoryTotals.map(([label, total]) => (
-              <div key={label} className="category-row">
-                <span>{label}</span>
-                <strong>{formatCurrency(total)}</strong>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-    </div>
-  );
-
-  const renderBudget = () => {
+  const renderAnalytics = () => {
     const overallBudget = fromPaisa(totalBudgetPaisa);
     const totalSpent = calculateExpenseTotal(transactions);
     const remainingBalance = overallBudget - totalSpent;
     const spendingPercent = overallBudget > 0 ? (totalSpent / overallBudget) * 100 : 0;
-    const sortedBudgetHistory = [...budgetHistory]
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
     return (
       <div className="stacked-blocks">
         <section className="panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Overall budget</p>
-              <h2>Add to budget</h2>
+              <p className="eyebrow">Monthly</p>
+              <h2>Analytics</h2>
+            </div>
+            <TrendingUp size={18} />
+          </div>
+
+          <div className="metric-grid">
+            <div className="metric-card">
+              <span>Expenses this month</span>
+              <strong>{formatCurrency(monthlyExpense)}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Categories</p>
+              <h2>Top spending</h2>
             </div>
           </div>
 
-          <form className="budget-form" onSubmit={handleSaveBudget}>
-            <div className="budget-entry-box">
-              <label htmlFor="budget-date">Date</label>
-              <input
-                id="budget-date"
-                name="date"
-                type="date"
-                value={budgetForm.date}
-                onChange={handleBudgetFormChange}
-                required
-              />
+          <div className="category-list">
+            {categoryTotals.length === 0 ? (
+              <div className="empty-state">No expense data is available yet.</div>
+            ) : (
+              categoryTotals.map(([label, total]) => (
+                <div key={label} className="category-row">
+                  <span>{label}</span>
+                  <strong>{formatCurrency(total)}</strong>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
 
-              <label htmlFor="budget-amount">Amount (PKR)</label>
-              <input
-                id="budget-amount"
-                name="amount"
-                type="number"
-                min="0.01"
-                step="0.01"
-                inputMode="decimal"
-                placeholder="Rs0"
-                value={budgetForm.amount}
-                onChange={handleBudgetFormChange}
-                required
-              />
-
-              <label htmlFor="budget-description">Description (optional)</label>
-              <textarea
-                id="budget-description"
-                name="description"
-                value={budgetForm.description}
-                onChange={handleBudgetFormChange}
-                placeholder="Add a note"
-                rows="3"
-              />
+        <section ref={budgetAnalysisRef} className="panel budget-analytics-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Budget</p>
+              <h2>Total budget balance</h2>
             </div>
-
-            {status.message ? (
-              <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
-                {status.message}
-              </p>
-            ) : null}
-
-            <button className="primary-action full" type="submit">
-              {editingBudgetHistoryId ? 'Update Budget' : 'Save Budget'}
-            </button>
-            {editingBudgetHistoryId ? (
-              <button
-                className="secondary-button wide"
-                type="button"
-                onClick={() => {
-                  setEditingBudgetHistoryId(null);
-                  setBudgetForm({ date: getLocalDateString(), amount: '', description: '' });
-                  setSelectedTransaction(null);
-                  setStatus({ type: 'idle', message: '' });
-                }}
-              >
-                Cancel editing
-              </button>
-            ) : null}
-          </form>
-
+          </div>
           <section className="budget-overall-summary">
-            <h3 className="budget-section-title">Total budget balance</h3>
             <div className="budget-summary">
               <div className="budget-summary-item">
                 <span>Total budget</span>
@@ -1080,7 +1323,6 @@ function App() {
                 </strong>
               </div>
             </div>
-
             <div
               className={`budget-progress${remainingBalance < 0 ? ' over-budget' : ''}`}
               role="progressbar"
@@ -1094,148 +1336,781 @@ function App() {
             </div>
           </section>
         </section>
+      </div>
+    );
+  };
+
+  const renderBudget = () => {
+    const sortedBudgetHistory = [...budgetHistory]
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+    return (
+      <div className="stacked-blocks">
+        <section className="panel">
+          <form ref={budgetFormRef} className="budget-form" onSubmit={handleSaveBudget}>
+            <div className="budget-entry-box">
+              <div className="budget-field-row">
+                <label htmlFor="budget-category">Category</label>
+                <select
+                  id="budget-category"
+                  name="budgetCategory"
+                  value={budgetForm.budgetCategory}
+                  onChange={handleBudgetFormChange}
+                  required
+                >
+                  {budgetCategories.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="budget-field-row">
+                <label htmlFor="budget-date">Date</label>
+                <input
+                  id="budget-date"
+                  name="date"
+                  type="date"
+                  value={budgetForm.date}
+                  onChange={handleBudgetFormChange}
+                  required
+                />
+              </div>
+
+              <div className="budget-field-row">
+                <label htmlFor="budget-amount">Amount (Rs)</label>
+                <input
+                  id="budget-amount"
+                  name="amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="Rs 2000"
+                  value={budgetForm.amount}
+                  onChange={handleBudgetFormChange}
+                  required
+                />
+              </div>
+
+              <div className="budget-field-row">
+                <label htmlFor="budget-description">Description</label>
+                <textarea
+                  id="budget-description"
+                  className="budget-description-field"
+                  name="description"
+                  value={budgetForm.description}
+                  onChange={handleBudgetFormChange}
+                  placeholder="(optional)"
+                  rows="1"
+                />
+              </div>
+
+              <button className="primary-action full" type="submit">
+                {editingBudgetHistoryId ? 'Save Changes' : 'Save Budget'}
+              </button>
+          
+
+            </div>
+
+            {status.message ? (
+              <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
+                {status.message}
+              </p>
+            ) : null}
+
+          </form>
+
+        </section>
 
         <section className="panel budget-history-panel">
           <div className="panel-header">
             <h2>Budget history</h2>
           </div>
-          <div className="budget-history-list">
+          <div className="transaction-list">
             {sortedBudgetHistory.length === 0 ? (
               <div className="empty-state">No budget history yet.</div>
             ) : (
-              sortedBudgetHistory.map((entry) => {
-                const isBudgetAddition = entry.entryType === 'addition';
-                const previousAmount = entry.previousAmount === null || entry.previousAmount === undefined
-                  ? 'Not set'
-                  : formatCurrency(fromPaisa(entry.previousAmount));
-                const amount = entry.amount === null
-                  ? 'Removed'
-                  : formatCurrency(fromPaisa(entry.amount));
-
-                return (
-                  <article className="budget-history-entry" key={entry.id}>
-                    <div className="budget-history-heading">
-                      <strong>{isBudgetAddition ? 'Budget added' : 'Previous budget entry'}</strong>
-                      <span>{entry.amount === null ? 'Removed' : isBudgetAddition ? 'Added' : entry.previousAmount === null ? 'Set' : 'Updated'}</span>
-                    </div>
-                    <p className="budget-history-amount">
-                      {isBudgetAddition ? `+${amount}` : <>{previousAmount} <span aria-hidden="true">→</span> {amount}</>}
-                    </p>
-                    <time dateTime={entry.createdAt}>
-                      {new Date(`${entry.date}T00:00:00`).toLocaleDateString('en-PK', { dateStyle: 'medium' })}
-                      {' · '}
-                      {new Date(entry.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
-                    </time>
-                    {entry.description ? <p className="budget-history-description">{entry.description}</p> : null}
-                    <div className="budget-history-actions">
-                      {entry.amount !== null ? (
-                        <button
-                          type="button"
-                          className="detail-edit-button"
-                          onClick={() => openBudgetHistoryEditor(entry)}
-                        >
-                          Edit
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="detail-delete-button"
-                        onClick={() => {
-                          setSelectedTransaction({ ...entry, historyType: 'budget', returnTab: 'budget' });
-                          setShowDeleteConfirm(true);
-                        }}
-                      >
-                        <Trash2 size={16} /> Delete
-                      </button>
-                    </div>
-                  </article>
-                );
-              })
+              sortedBudgetHistory.map((entry) => renderHistoryItem({ ...entry, historyType: 'budget' }))
             )}
           </div>
         </section>
-
-        {showDeleteConfirm && selectedTransaction?.historyType === 'budget' && selectedTransaction.returnTab === 'budget' ? (
-          <div className="delete-overlay" role="presentation">
-            <section className="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-budget-history-title">
-              <h2 id="delete-budget-history-title">Delete Budget History?</h2>
-              <p>
-                {selectedTransaction.entryType === 'addition'
-                  ? 'This budget addition will be removed from your total balance.'
-                  : 'This previous budget entry will be removed.'}
-              </p>
-              <div className="delete-dialog-actions">
-                <button type="button" className="dialog-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
-                <button type="button" className="dialog-delete" onClick={handleDelete}><Trash2 size={17} /> Delete</button>
-              </div>
-            </section>
-          </div>
-        ) : null}
       </div>
     );
   };
 
-  const renderMore = () => (
-    <div className="stacked-blocks">
-      <section className="panel">
-        <div className="panel-header">
+  const renderMore = () => {
+    return (
+      <div className="more-page">
+        <section className="more-group" aria-labelledby="more-account-heading">
+          <h2 id="more-account-heading" className="more-group-title">Account</h2>
+          <button
+            type="button"
+            className="more-row"
+            onClick={() => openAccount()}
+          >
+            <span>Categories</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </button>
+          <button
+            type="button"
+            className="more-row"
+            onClick={() => openPaymentMethods()}
+          >
+            <span>Payment Methods</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </button>
+        </section>
+
+        <section className="more-group" aria-labelledby="more-data-heading">
+          <h2 id="more-data-heading" className="more-group-title">Data &amp; Backup</h2>
+          <button
+            type="button"
+            className="more-row"
+            onClick={() => {
+              setStatus({ type: 'idle', message: '' });
+              setTab('export-data');
+            }}
+          >
+            <span>Export Data</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </button>
+          <button
+            type="button"
+            className="more-row"
+            onClick={() => {
+              setRestoreCandidate(null);
+              setStatus({ type: 'idle', message: '' });
+              setTab('restore-data');
+            }}
+          >
+            <span>Restore Data</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </button>
+          <div className="more-row more-row-muted">
+            <span>Cloud Sync</span>
+            <span className="more-row-value">Coming Later</span>
+          </div>
+          {status.message ? (
+            <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>{status.message}</p>
+          ) : null}
+        </section>
+
+        <section className="more-group" aria-labelledby="more-preferences-heading">
+          <h2 id="more-preferences-heading" className="more-group-title">Preferences</h2>
+          <div className="more-row more-row-muted">
+            <span>Currency</span>
+            <span className="more-row-value">PKR · Fixed</span>
+          </div>
+          <button type="button" className="more-row" onClick={openPreferences}>
+            <span>Date Format</span>
+            <span className="more-row-trailing">
+              <span className="more-row-value">{preferences?.dateFormat || 'DD MMM YYYY'}</span>
+              <ChevronRight className="more-chevron" size={20} />
+            </span>
+          </button>
+          <button type="button" className="more-row" onClick={openPreferences}>
+            <span>Notifications</span>
+            <span className="more-row-trailing">
+              <span className="more-row-value">{preferences?.notificationsEnabled ? 'Basic · On' : 'Basic · Off'}</span>
+              <ChevronRight className="more-chevron" size={20} />
+            </span>
+          </button>
+        </section>
+
+        <section className="more-group" aria-labelledby="more-help-heading">
+          <h2 id="more-help-heading" className="more-group-title">Help</h2>
+          <button type="button" className="more-row" onClick={() => setTab('help')}>
+            <span>Help &amp; FAQ</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </button>
+          <button type="button" className="more-row" onClick={() => setTab('about')}>
+            <span>About</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </button>
+        </section>
+      </div>
+    );
+  };
+
+  const renderAbout = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>About</h1>
+      </header>
+
+      <section className="about-content">
+        <article className="about-intro-card">
+          <WalletCards className="about-brand-icon" size={24} aria-hidden="true" />
+          <h2>PWS V1</h2>
+          <p className="about-tagline">Manage your money simply.</p>
+          <p className="about-description">A simple personal finance tool for students and users in Pakistan.</p>
+        </article>
+
+        <div className="export-data-notice about-local-notice">
+          <ShieldCheck size={20} aria-hidden="true" />
           <div>
-            <p className="eyebrow">Manage</p>
-            <h2>Categories</h2>
+            <strong>Local-first &amp; offline friendly</strong>
+            <p>No account required. Track income and expenses, understand your spending and set budgets in Pakistani Rupees.</p>
           </div>
         </div>
 
-        <div className="inline-form">
-          <input value={categoryInput} onChange={(event) => setCategoryInput(event.target.value)} placeholder="Add category" />
-          <button type="button" className="secondary-button" onClick={handleAddCategory}>Add</button>
+        <section className="more-group about-details" aria-label="App information">
+          <div className="more-row">
+            <span>Version</span>
+            <span className="more-row-value">V1</span>
+          </div>
+          <div className="more-row">
+            <span>Currency</span>
+            <span className="more-row-value">PKR (Rs)</span>
+          </div>
+          <div className="more-row">
+            <span>Appearance</span>
+            <span className="more-row-value">Light</span>
+          </div>
+          <div className="more-row more-row-muted">
+            <span>Cloud Sync</span>
+            <span className="more-row-value">Coming Later</span>
+          </div>
+        </section>
+      </section>
+    </main>
+  );
+
+  const renderHelp = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>Help &amp; FAQ</h1>
+      </header>
+
+      <section className="help-faq-list" aria-label="Frequently asked questions">
+        <article className="help-faq-item">
+          <h2>How is my balance calculated?</h2>
+          <p>Income − Expenses = Available Balance.</p>
+        </article>
+        <article className="help-faq-item">
+          <h2>Can I use PWS offline?</h2>
+          <p>Yes. Record transactions without an internet connection. Your data stays on this device.</p>
+        </article>
+        <article className="help-faq-item">
+          <h2>How do I keep my data safe?</h2>
+          <p>In More, choose Export Data. Keep your backup outside the app before clearing browser data.</p>
+        </article>
+        <article className="help-faq-item">
+          <h2>Can I sync or change currency?</h2>
+          <p>Cloud Sync is coming later. PWS V1 uses PKR only.</p>
+        </article>
+      </section>
+    </main>
+  );
+
+  const renderPreferences = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>Preferences</h1>
+      </header>
+
+      <form className="preferences-content" onSubmit={handleSavePreferences}>
+        <section className="preferences-currency-card">
+          <h2>Currency</h2>
+          <div className="preferences-currency-row">
+            <span>Pakistani Rupees</span>
+            <span>PKR · Fixed</span>
+          </div>
+          <p>All amounts use Rs. PWS V1 supports PKR only.</p>
+        </section>
+
+        <div className="preferences-date-field">
+          <label htmlFor="date-format">Date Format</label>
+          <select
+            id="date-format"
+            value={preferenceDateFormatDraft}
+            onChange={(event) => {
+              setPreferenceDateFormatDraft(event.target.value);
+              setPreferenceSaveStatus({ type: 'idle', message: '' });
+            }}
+          >
+            {dateFormatOptions.map((dateFormat) => (
+              <option key={dateFormat} value={dateFormat}>{dateFormat}</option>
+            ))}
+          </select>
+          <span className="preferences-date-example">
+            Example: {formatDate(new Date(2026, 9, 3), preferenceDateFormatDraft)}
+          </span>
         </div>
 
-        <div className="chip-list">
+        <section className="preferences-notification-card">
+          <h2>Notifications</h2>
+          <div className="preferences-notification-row">
+            <span>Basic notifications · {preferenceNotificationsDraft ? 'On' : 'Off'}</span>
+            <button
+              type="button"
+              className="preferences-toggle"
+              role="switch"
+              aria-checked={preferenceNotificationsDraft}
+              aria-label="Basic notifications"
+              onClick={() => {
+                setPreferenceNotificationsDraft((current) => !current);
+                setPreferenceSaveStatus({ type: 'idle', message: '' });
+              }}
+            >
+              <span />
+            </button>
+          </div>
+          <p>Basic notifications only. No advanced alerts or predictions.</p>
+        </section>
+
+        <button type="submit" className="primary-action full preferences-save-button">
+          Save preferences
+        </button>
+        {preferenceSaveStatus.message ? (
+          <p className={`status ${preferenceSaveStatus.type}`} role={preferenceSaveStatus.type === 'error' ? 'alert' : 'status'}>
+            {preferenceSaveStatus.message}
+          </p>
+        ) : null}
+      </form>
+    </main>
+  );
+
+  const renderAccount = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>Account</h1>
+      </header>
+
+      <section className="account-content">
+        <div className="account-category-list" aria-label="Categories">
           {categories.map((category) => (
-            <span key={category.id} className="chip">{category.name}</span>
+            <div className="account-category-row" key={category.id}>
+              <span>{category.name}</span>
+              <div className="account-category-actions">
+                <button
+                  type="button"
+                  className="account-category-edit"
+                  onClick={() => handleSelectCategory(category)}
+                  aria-label={`Edit ${category.name}`}
+                  aria-pressed={selectedCategoryId === category.id}
+                >
+                  <Pencil size={20} />
+                </button>
+                <button
+                  type="button"
+                  className="account-category-remove"
+                  onClick={() => {
+                    setCategoryEditStatus({ type: 'idle', message: '' });
+                    setCategoryToDelete(category);
+                  }}
+                  aria-label={`Remove ${category.name}`}
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
+        {categoryEditStatus.message ? (
+          <p className={`status ${categoryEditStatus.type}`} role={categoryEditStatus.type === 'error' ? 'alert' : 'status'}>
+            {categoryEditStatus.message}
+          </p>
+        ) : null}
+
+        <form className="account-category-form" onSubmit={handleSaveCategory}>
+          <label htmlFor="account-category-name">Category Name</label>
+          <input
+            id="account-category-name"
+            value={categoryNameDraft}
+            onChange={(event) => {
+              setCategoryNameDraft(event.target.value);
+              setCategoryEditStatus({ type: 'idle', message: '' });
+            }}
+            aria-label="Category Name"
+            disabled={!selectedCategoryId}
+            required
+          />
+          <button className="primary-action full account-save-button" type="submit" disabled={!selectedCategoryId}>
+            Save Changes
+          </button>
+        </form>
+        <section className="account-add-category">
+          <button
+            type="button"
+            className="secondary-button wide"
+            onClick={() => {
+              setShowAddCategoryForm((current) => !current);
+              setCategoryInput('');
+              setCategoryEditStatus({ type: 'idle', message: '' });
+            }}
+            aria-expanded={showAddCategoryForm}
+            aria-controls="account-add-category-form"
+          >
+            Add Category
+          </button>
+          {showAddCategoryForm ? (
+            <form
+              id="account-add-category-form"
+              className="inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleAddCategory();
+              }}
+            >
+              <input
+                value={categoryInput}
+                onChange={(event) => {
+                  setCategoryInput(event.target.value);
+                  setCategoryEditStatus({ type: 'idle', message: '' });
+                }}
+                placeholder="Category name"
+                aria-label="Category name"
+                required
+              />
+              <button type="submit" className="secondary-button">Add</button>
+            </form>
+          ) : null}
+        </section>
       </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Manage</p>
-            <h2>Payment methods</h2>
-          </div>
+      {categoryToDelete ? (
+        <div className="delete-overlay" role="presentation">
+          <section className="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-category-title">
+            <h2 id="delete-category-title">Remove Category?</h2>
+            <p>
+              Remove “{categoryToDelete.name}” from your categories? Categories used by existing expenses or budgets cannot be removed.
+            </p>
+            <div className="delete-dialog-actions">
+              <button type="button" className="dialog-cancel" onClick={() => setCategoryToDelete(null)}>Cancel</button>
+              <button type="button" className="dialog-delete" onClick={handleDeleteCategory}>
+                <Trash2 size={17} /> Remove
+              </button>
+            </div>
+          </section>
         </div>
+      ) : null}
+    </main>
+  );
 
-        <div className="inline-form">
-          <input value={methodInput} onChange={(event) => setMethodInput(event.target.value)} placeholder="Add payment method" />
-          <button type="button" className="secondary-button" onClick={handleAddMethod}>Add</button>
-        </div>
+  const renderPaymentMethods = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>Payment Methods</h1>
+      </header>
 
-        <div className="chip-list">
+      <section className="account-content">
+        <div className="account-category-list" aria-label="Payment methods">
           {paymentMethods.map((method) => (
-            <span key={method.id} className="chip">{method.name}</span>
+            <div className="account-category-row" key={method.id}>
+              <span>{method.name}</span>
+              <div className="account-category-actions">
+                <button
+                  type="button"
+                  className="account-category-edit"
+                  onClick={() => handleSelectPaymentMethod(method)}
+                  aria-label={`Edit ${method.name}`}
+                  aria-pressed={selectedPaymentMethodId === method.id}
+                >
+                  <Pencil size={20} />
+                </button>
+                <button
+                  type="button"
+                  className="account-category-remove"
+                  onClick={() => {
+                    setPaymentMethodEditStatus({ type: 'idle', message: '' });
+                    setPaymentMethodToDelete(method);
+                  }}
+                  aria-label={`Remove ${method.name}`}
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
-      </section>
+        {paymentMethodEditStatus.message ? (
+          <p className={`status ${paymentMethodEditStatus.type}`} role={paymentMethodEditStatus.type === 'error' ? 'alert' : 'status'}>
+            {paymentMethodEditStatus.message}
+          </p>
+        ) : null}
 
-      <section className="panel">
-        <div className="panel-header">
+        <form className="account-category-form" onSubmit={handleSavePaymentMethod}>
+          <label htmlFor="payment-method-name">Payment Method Name</label>
+          <input
+            id="payment-method-name"
+            value={paymentMethodNameDraft}
+            onChange={(event) => {
+              setPaymentMethodNameDraft(event.target.value);
+              setPaymentMethodEditStatus({ type: 'idle', message: '' });
+            }}
+            aria-label="Payment Method Name"
+            disabled={!selectedPaymentMethodId}
+            required
+          />
+          <button className="primary-action full account-save-button" type="submit" disabled={!selectedPaymentMethodId}>
+            Save Changes
+          </button>
+        </form>
+        <section className="account-add-category">
+          <button
+            type="button"
+            className="secondary-button wide"
+            onClick={() => {
+              setShowAddPaymentMethodForm((current) => !current);
+              setMethodInput('');
+              setPaymentMethodEditStatus({ type: 'idle', message: '' });
+            }}
+            aria-expanded={showAddPaymentMethodForm}
+            aria-controls="account-add-payment-method-form"
+          >
+            Add Payment Method
+          </button>
+          {showAddPaymentMethodForm ? (
+            <form
+              id="account-add-payment-method-form"
+              className="inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleAddMethod();
+              }}
+            >
+              <input
+                value={methodInput}
+                onChange={(event) => {
+                  setMethodInput(event.target.value);
+                  setPaymentMethodEditStatus({ type: 'idle', message: '' });
+                }}
+                placeholder="Payment method name"
+                aria-label="Payment method name"
+                required
+              />
+              <button type="submit" className="secondary-button">Add</button>
+            </form>
+          ) : null}
+        </section>
+      </section>
+      {paymentMethodToDelete ? (
+        <div className="delete-overlay" role="presentation">
+          <section className="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-payment-method-title">
+            <h2 id="delete-payment-method-title">Remove Payment Method?</h2>
+            <p>
+              Remove “{paymentMethodToDelete.name}” from your payment methods? Methods used by existing transactions cannot be removed.
+            </p>
+            <div className="delete-dialog-actions">
+              <button type="button" className="dialog-cancel" onClick={() => setPaymentMethodToDelete(null)}>Cancel</button>
+              <button type="button" className="dialog-delete" onClick={handleDeletePaymentMethod}>
+                <Trash2 size={17} /> Remove
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </main>
+  );
+
+  const renderExportData = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>Export Data</h1>
+      </header>
+
+      <section className="export-data-content">
+        <div className="export-data-notice">
+          <ShieldCheck size={20} aria-hidden="true" />
           <div>
-            <p className="eyebrow">Data</p>
-            <h2>Backup & restore</h2>
+            <strong>Keep a copy of your data</strong>
+            <p>PWS stores your records on this device. A backup protects them if you clear browser data or change your phone.</p>
           </div>
         </div>
 
-        <div className="inline-form stacked">
-          <button type="button" className="secondary-button wide" onClick={handleExport}>
-            <Download size={16} /> Export backup
-          </button>
-          <button type="button" className="secondary-button wide" onClick={() => fileInputRef.current?.click()}>
-            <Upload size={16} /> Restore backup
-          </button>
-          <input ref={fileInputRef} type="file" accept="application/json" hidden onChange={handleRestore} />
-        </div>
+        <section className="more-group export-data-card" aria-labelledby="local-backup-heading">
+          <h2 id="local-backup-heading" className="more-group-title">Local backup</h2>
+          <div className="more-row">
+            <span>Transactions</span>
+            <span className="more-row-value">Included</span>
+          </div>
+          <div className="more-row">
+            <span>Budgets</span>
+            <span className="more-row-value">Included</span>
+          </div>
+          <div className="more-row">
+            <span>Categories &amp; methods</span>
+            <span className="more-row-value">Included</span>
+          </div>
+          <p className="export-data-footnote">Export does not remove or change your data. Keep the downloaded file somewhere safe.</p>
+        </section>
+
+        <button type="button" className="primary-action full export-data-button" onClick={handleExport}>
+          Export Data
+        </button>
+        {status.message ? (
+          <p className={`export-data-status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
+            {status.type === 'success' ? <span aria-hidden="true">✓</span> : null}
+            {status.message}
+          </p>
+        ) : null}
+        <p className="export-data-disclaimer">No cloud account or bank connection is required.</p>
       </section>
-    </div>
+    </main>
+  );
+
+  const renderRestoreData = () => (
+    <main className="account-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab('more')} aria-label="Back to More">
+          <ArrowLeft size={22} />
+        </button>
+        <h1>Restore Data</h1>
+      </header>
+
+      <section className="export-data-content">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={handleRestoreFileChange}
+        />
+        {status.type === 'success' ? (
+          <>
+            <div className="export-data-notice">
+              <ShieldCheck size={20} aria-hidden="true" />
+              <div>
+                <strong>Your local records are ready</strong>
+                <p>The selected backup has replaced the records on this device. No data was sent to a cloud account.</p>
+              </div>
+            </div>
+            <p className="restore-complete-status" role="status">
+              <span aria-hidden="true">✓</span>
+              Data restored
+            </p>
+            <button type="button" className="restore-back-button" onClick={() => setTab('more')}>
+              Back to More
+            </button>
+          </>
+        ) : status.type === 'error' ? (
+          <>
+            <section className="restore-error-card" role="alert">
+              <CircleAlert className="restore-error-icon" size={22} aria-hidden="true" />
+              <h2>Unable to restore data</h2>
+              <p>Choose a valid PWS backup and try again.</p>
+              <strong>Your current data is unchanged.</strong>
+            </section>
+            <button
+              type="button"
+              className="primary-action full restore-retry-button"
+              onClick={() => {
+                setStatus({ type: 'idle', message: '' });
+                setRestoreCandidate(null);
+                setShowRestoreConfirm(false);
+                fileInputRef.current?.click();
+              }}
+            >
+              Choose another file
+            </button>
+            <button
+              type="button"
+              className="restore-back-button"
+              onClick={() => {
+                setStatus({ type: 'idle', message: '' });
+                setRestoreCandidate(null);
+                setShowRestoreConfirm(false);
+                setTab('more');
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+        <div className="export-data-notice">
+          {restoreCandidate ? <FileUp size={20} aria-hidden="true" /> : <ShieldCheck size={20} aria-hidden="true" />}
+          <div>
+            <strong>{restoreCandidate ? 'Backup ready to restore' : 'Back up before you restore'}</strong>
+            <p>{restoreCandidate
+              ? 'PWS backup selected. Confirmation required before replacing your local records.'
+              : 'Restoring replaces the records currently on this device. Export a backup first so you can recover your existing data.'}</p>
+          </div>
+        </div>
+
+        <section className="restore-file-card">
+          {restoreCandidate ? (
+            <button
+              type="button"
+              className="restore-selected-backup"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Choose a different backup file"
+            >
+              <strong>Selected backup</strong>
+              <span>{`PWS backup · ${restoreCandidate.fileDate}`}</span>
+            </button>
+          ) : (
+            <>
+              <FileUp className="restore-file-icon" size={22} aria-hidden="true" />
+              <h2>Choose a PWS backup</h2>
+              <p>Use a backup previously exported from PWS.</p>
+              <button
+                type="button"
+                className="restore-file-button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isPreparingRestore}
+              >
+                {isPreparingRestore ? 'Checking backup…' : 'Choose backup file'}
+              </button>
+            </>
+          )}
+        </section>
+
+        {restoreCandidate ? (
+          <button
+            type="button"
+            className="primary-action full restore-data-button"
+            onClick={() => setShowRestoreConfirm(true)}
+          >
+            Restore Data
+          </button>
+        ) : null}
+        {status.message ? (
+          <p className={`restore-data-status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
+            {status.message}
+          </p>
+        ) : null}
+        {!restoreCandidate ? (
+          <p className="export-data-disclaimer">Select a valid backup to continue. Your current data stays unchanged until you confirm.</p>
+        ) : null}
+          </>
+        )}
+      </section>
+
+      {showRestoreConfirm && restoreCandidate ? (
+        <div className="delete-overlay" role="presentation">
+          <section className="delete-dialog restore-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-confirm-title">
+            <h2 id="restore-confirm-title">Restore backup?</h2>
+            <p>This will replace the data on this device. Export your current data first if you want to keep it.</p>
+            <div className="delete-dialog-actions">
+              <button type="button" className="dialog-cancel" onClick={() => setShowRestoreConfirm(false)}>Cancel</button>
+              <button type="button" className="restore-confirm-button" onClick={handleConfirmRestore}>
+                <Trash2 size={18} aria-hidden="true" />
+                Restore
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </main>
   );
 
   if (isLoading) {
@@ -1327,6 +2202,34 @@ function App() {
     return renderTransactionDetail();
   }
 
+  if (tab === 'account') {
+    return renderAccount();
+  }
+
+  if (tab === 'payment-methods') {
+    return renderPaymentMethods();
+  }
+
+  if (tab === 'preferences') {
+    return renderPreferences();
+  }
+
+  if (tab === 'help') {
+    return renderHelp();
+  }
+
+  if (tab === 'about') {
+    return renderAbout();
+  }
+
+  if (tab === 'export-data') {
+    return renderExportData();
+  }
+
+  if (tab === 'restore-data') {
+    return renderRestoreData();
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1341,6 +2244,22 @@ function App() {
               title="More"
             >
               <Ellipsis size={22} />
+            </button>
+          </div>
+        ) : null}
+        {tab === 'budget' ? (
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="more-button"
+              onClick={() => {
+                setFocusBudgetAnalysis(true);
+                setTab('analytics');
+              }}
+              aria-label="View budget analysis"
+              title="Budget analysis"
+            >
+              <ChartNoAxesCombined size={22} strokeWidth={1.9} />
             </button>
           </div>
         ) : null}
