@@ -49,6 +49,7 @@ function App() {
   const [budgetInputs, setBudgetInputs] = useState({});
   const [preferences, setPreferences] = useState(null);
   const [onboardingName, setOnboardingName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef(null);
 
   const categoryMap = useMemo(
@@ -134,7 +135,11 @@ function App() {
       onboardingCompleted: true
     };
 
-    await db.preferences.put(nextPreferences);
+    setIsLoading(true);
+    await Promise.all([
+      db.preferences.put(nextPreferences),
+      new Promise((resolve) => window.setTimeout(resolve, 1150))
+    ]);
     setPreferences(nextPreferences);
   };
 
@@ -609,6 +614,45 @@ function App() {
     </div>
   );
 
+  if (isLoading) {
+    return (
+      <main className="loading-shell" aria-live="polite" aria-busy="true">
+        <h2 className="loading-title">Home</h2>
+        <section className="loading-content">
+          <div className="loading-card loading-card-wide">
+            <div className="skeleton-line skeleton-line-lg" />
+            <div className="skeleton-grid">
+              <div className="skeleton-line" />
+              <div className="skeleton-line" />
+            </div>
+          </div>
+
+          <div className="loading-card loading-card-chart">
+            <div className="skeleton-line skeleton-line-lg" />
+            <div className="skeleton-bars">
+              <span />
+              <span />  
+              <span />  
+              <span />
+              <span />
+            </div>
+          </div>
+
+          <div className="loading-card loading-card-list">
+            <div className="skeleton-line skeleton-line-lg" />
+            <div className="skeleton-row"><span /><span /></div>
+            <div className="skeleton-row"><span /><span /></div>
+            <div className="skeleton-row">
+              <span /><span />
+            </div>
+          </div>
+
+          {/* <p className="loading-message">Loading ...</p> */}
+        </section>
+      </main>
+    );
+  }
+
   if (preferences && !preferences.onboardingCompleted) {
     return (
       <main className="onboarding-shell">
@@ -636,7 +680,7 @@ function App() {
             />
 
             <div className="privacy-note">
-              <ShieldCheck size={20} />
+              <ShieldCheck size={24} />
               <div>
                 <strong>Your data stays on this device</strong>
                 <span>Works offline. 
