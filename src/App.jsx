@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
+  ArrowLeft,
   ArrowLeftRight,
+  CalendarDays,
+  Clock3,
   ArrowUpRight,
   ChartNoAxesCombined,
   Download,
@@ -10,9 +13,10 @@ import {
   PiggyBank,
   Plus,
   ShieldCheck,
+  Trash2,
   TrendingUp,
   Upload,
-  Wallet,
+  Utensils,
   WalletCards
 } from 'lucide-react';
 import { db, seedDatabase } from './db/db';
@@ -31,8 +35,8 @@ const initialForm = {
   title: '',
   amount: '',
   type: 'expense',
-  categoryId: defaultCategories[1]?.id || defaultCategories[0].id,
-  paymentMethodId: defaultPaymentMethods[0].id,
+  categoryId: defaultCategories.find((category) => category.name === 'Other')?.id || defaultCategories[0].id,
+  paymentMethodId: defaultPaymentMethods.find((method) => method.name === 'Other')?.id || defaultPaymentMethods[0].id,
   date: new Date().toISOString().slice(0, 10),
   notes: ''
 };
@@ -54,6 +58,9 @@ function App() {
   const [preferences, setPreferences] = useState(null);
   const [onboardingName, setOnboardingName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [editingTransactionId, setEditingTransactionId] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const fileInputRef = useRef(null);
 
   const categoryMap = useMemo(
@@ -172,21 +179,31 @@ function App() {
       createdAt: new Date().toISOString()
     };
 
-    await db.transactions.add(nextPayload);
+    if (editingTransactionId) {
+      await db.transactions.update(editingTransactionId, nextPayload);
+    } else {
+      await db.transactions.add(nextPayload);
+    }
     setForm({
       ...initialForm,
-      categoryId: categories[0]?.id || defaultCategories[1].id,
-      paymentMethodId: paymentMethods[0]?.id || defaultPaymentMethods[0].id
+      categoryId: categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id,
+      paymentMethodId: paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id
     });
-    setStatus({ type: 'success', message: 'Transaction saved successfully.' });
+    setStatus({ type: 'idle', message: '' });
+    setEditingTransactionId(null);
+    setSelectedTransaction(null);
     loadData();
+    setTab('transactions');
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this transaction?')) return;
-    await db.transactions.delete(id);
-    setStatus({ type: 'success', message: 'Transaction deleted.' });
-    loadData();
+  const handleDelete = async () => {
+    if (!selectedTransaction?.id) return;
+    await db.transactions.delete(selectedTransaction.id);
+    setShowDeleteConfirm(false);
+    setSelectedTransaction(null);
+    setStatus({ type: 'idle', message: '' });
+    await loadData();
+    setTab('transactions');
   };
 
   const handleAddCategory = async () => {
@@ -278,58 +295,34 @@ function App() {
 
   const renderHome = () => (
     <>
+      <section className="home-heading-meta">
+        <h2>{`Good ${new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 18 ? 'Afternoon' : 'Evening'}, ${preferences?.name || 'User'}`}</h2>
+        <p>{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+      </section>
+
       <section className="hero-panel">
         <div className="hero-topline">
           <span className="muted-label">Available balance</span>
-          <span className="mini-pill success">+12.4%</span>
         </div>
         <div className="hero-amount">{formatCurrency(summary.balance)}</div>
         <div className="quick-metrics">
-          <div>
+          <div className="quick-metrics_income">
             <span>Income</span>
             <strong className="income">{formatCurrency(summary.income)}</strong>
           </div>
-          <div>
+          <div className="quick-metrics_expense">
             <span>Expense</span>
             <strong className="expense">{formatCurrency(summary.expense)}</strong>
           </div>
         </div>
-        <button type="button" className="primary-action full hero-add-button" onClick={() => setTab('transactions')}>
+        <button type="button" className="primary-action full hero-add-button" onClick={() => setTab('add-transaction')}>
           <Plus size={16} /> Add Transaction
         </button>
       </section>
 
-      <section className="summary-grid">
-        <article className="summary-card primary">
-          <div className="summary-header">
-            <span className="summary-label">Wallet</span>
-            <span className="icon-badge"><Wallet size={16} /></span>
-          </div>
-          <strong>{formatCurrency(summary.balance)}</strong>
-        </article>
-        <article className="summary-card income">
-          <div className="summary-header">
-            <span className="summary-label">Income</span>
-            <span className="icon-badge"><ArrowDownLeft size={16} /></span>
-          </div>
-          <strong>{formatCurrency(summary.income)}</strong>
-        </article>
-        <article className="summary-card expense">
-          <div className="summary-header">
-            <span className="summary-label">Expense</span>
-            <span className="icon-badge"><ArrowUpRight size={16} /></span>
-          </div>
-          <strong>{formatCurrency(summary.expense)}</strong>
-        </article>
-      </section>
-
       <section className="panel">
         <div className="panel-header">
-          <div>
-            <p className="eyebrow">This week</p>
-            <h2>Spending overview</h2>
-          </div>
-          <TrendingUp size={18} />
+          <h2>Weekly spending</h2>
         </div>
 
         <div className="chart-bars" aria-label="Weekly spending chart">
@@ -337,21 +330,19 @@ function App() {
             const max = Math.max(...weeklySpending.map((item) => item.value), 1);
             return (
               <div key={day.label} className="bar-column">
-                <span className="bar-value">{formatCurrency(day.value)}</span>
+                <span className="bar-value">{Math.round(day.value).toLocaleString('en-PK')}</span>
                 <span className="bar" style={{ height: `${Math.max(18, (day.value / max) * 100)}%` }} />
-                <small>{day.label}</small>
+                <small>{day.label.slice(0, 3)}</small>
               </div>
             );
           })}
         </div>
+        <p className="chart-footer">Expenses in PKR (Rs)</p>
       </section>
 
       <section className="panel">
         <div className="panel-header">
-          <div>
-            <p className="eyebrow">Latest</p>
-            <h2>Recent transactions</h2>
-          </div>
+          <h2>Recent transactions</h2>
           <button type="button" className="link-button" onClick={() => setTab('transactions')}>View all</button>
         </div>
 
@@ -376,14 +367,30 @@ function App() {
     </>
   );
 
+  const openAddTransactionFromFilter = () => {
+    setEditingTransactionId(null);
+    setSelectedTransaction(null);
+    setForm((current) => {
+      const expenseCategory = categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
+      const incomeCategory = categories.find((category) => category.type === 'income')?.id || expenseCategory;
+      const otherMethod = paymentMethods.find((method) => method.name === 'Other')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
+      const type = view === 'all' ? 'expense' : view;
+
+      return {
+        ...initialForm,
+        type,
+        categoryId: type === 'income' ? incomeCategory : expenseCategory,
+        paymentMethodId: otherMethod
+      };
+    });
+    setTab('add-transaction');
+  };
+
   const renderTransactions = () => (
     <div className="stacked-blocks">
       <section className="panel">
         <div className="panel-header">
-          <div>
-            <p className="eyebrow">Manage</p>
-            <h2>Transactions</h2>
-          </div>
+          <h2>Transactions</h2>
         </div>
 
         <div className="segmented-control">
@@ -399,31 +406,9 @@ function App() {
           ))}
         </div>
 
-        <form className="form-grid" onSubmit={handleSubmit}>
-          <input name="title" value={form.title} onChange={handleInputChange} placeholder="Title" />
-          <input name="amount" type="number" step="0.01" min="0.01" value={form.amount} onChange={handleInputChange} placeholder="Amount" />
-          <select name="type" value={form.type} onChange={handleInputChange}>
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
-          </select>
-          <select name="categoryId" value={form.categoryId} onChange={handleInputChange}>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>{category.name}</option>
-            ))}
-          </select>
-          <select name="paymentMethodId" value={form.paymentMethodId} onChange={handleInputChange}>
-            {paymentMethods.map((method) => (
-              <option key={method.id} value={method.id}>{method.name}</option>
-            ))}
-          </select>
-          <input name="date" type="date" value={form.date} onChange={handleInputChange} />
-          <textarea name="notes" value={form.notes} onChange={handleInputChange} placeholder="Notes (optional)" rows="3" />
-          <button className="primary-action full" type="submit">
-            <Plus size={16} /> Save transaction
-          </button>
-        </form>
-
-        {status.message && <div className={`status ${status.type}`}>{status.message}</div>}
+        <button type="button" className="primary-action full transaction-list-add-button" onClick={openAddTransactionFromFilter}>
+          <Plus size={16} /> {view === 'income' ? 'Add Income' : view === 'expense' ? 'Add Expense' : 'Add Transaction'}
+        </button>
       </section>
 
       <section className="panel">
@@ -439,7 +424,16 @@ function App() {
             <div className="empty-state">No transactions yet.</div>
           ) : (
             filteredTransactions.map((tx) => (
-              <div key={tx.id} className="transaction-item">
+              <button
+                key={tx.id}
+                type="button"
+                className="transaction-item transaction-row"
+                onClick={() => {
+                  setSelectedTransaction(tx);
+                  setShowDeleteConfirm(false);
+                  setTab('transaction-detail');
+                }}
+              >
                 <div className={`transaction-icon ${tx.type}`}>
                   {tx.type === 'income' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
                 </div>
@@ -450,15 +444,143 @@ function App() {
                 <div className="transaction-meta align-right">
                   <strong className={tx.type}>{tx.type === 'income' ? '+' : '-'}{formatCurrency(Number(tx.amount || 0))}</strong>
                   <span>{new Date(tx.date).toLocaleDateString('en-PK')}</span>
-                  <button type="button" className="mini-button" onClick={() => handleDelete(tx.id)}>Delete</button>
                 </div>
-              </div>
+              </button>
             ))
           )}
         </div>
       </section>
     </div>
   );
+
+  const renderAddTransaction = () => (
+    <main className="add-transaction-shell">
+      <header className="add-transaction-header">
+        <button type="button" className="back-button" onClick={() => setTab(editingTransactionId ? 'transactions' : 'home')} aria-label={editingTransactionId ? 'Back to transactions' : 'Back to home'}>
+          <ArrowLeft size={22} />
+        </button>
+        <h1>{editingTransactionId ? 'Edit Transaction' : 'Add Transaction'}</h1>
+      </header>
+
+      <section className="add-transaction-content">
+        <div className="transaction-type-control" aria-label="Transaction type">
+          <button
+            type="button"
+            className={form.type === 'income' ? 'active' : ''}
+            onClick={() => setForm((current) => ({ ...current, type: 'income', categoryId: categories.find((category) => category.type === 'income')?.id || current.categoryId }))}
+          >Income</button>
+          <button
+            type="button"
+            className={form.type === 'expense' ? 'active' : ''}
+            onClick={() => setForm((current) => ({ ...current, type: 'expense', categoryId: categories.find((category) => category.name === 'Other')?.id || current.categoryId }))}
+          >Expense</button>
+        </div>
+
+        <form className="transaction-form" onSubmit={handleSubmit}>
+          <label htmlFor="transaction-amount">Amount (PKR)</label>
+          <input id="transaction-amount" name="amount" type="number" step="0.01" min="0.01" value={form.amount} onChange={handleInputChange} placeholder="Rs0" />
+
+          {form.type === 'expense' ? (
+            <>
+              <label htmlFor="transaction-category">Category</label>
+              <select id="transaction-category" name="categoryId" value={form.categoryId} onChange={handleInputChange}>
+                {categories.filter((category) => category.type === 'expense').map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </>
+          ) : null}
+
+          <label htmlFor="transaction-title">Description</label>
+          <input id="transaction-title" name="title" value={form.title} onChange={handleInputChange} placeholder="Description" />
+
+          <label htmlFor="transaction-method">Payment Method</label>
+          <select id="transaction-method" name="paymentMethodId" value={form.paymentMethodId} onChange={handleInputChange}>
+            {paymentMethods.map((method) => (
+              <option key={method.id} value={method.id}>{method.name}</option>
+            ))}
+          </select>
+
+          <label htmlFor="transaction-date">Date</label>
+          <input id="transaction-date" name="date" type="date" value={form.date} onChange={handleInputChange} />
+
+          <button className="primary-action full transaction-save-button" type="submit">
+            {editingTransactionId ? 'Save Changes' : 'Save Transaction'}
+          </button>
+        </form>
+
+        <p className="transaction-device-note">Saved on this device.</p>
+      </section>
+    </main>
+  );
+
+  const openTransactionEditor = () => {
+    if (!selectedTransaction) return;
+    setEditingTransactionId(selectedTransaction.id);
+    setForm({
+      ...initialForm,
+      title: selectedTransaction.title || '',
+      amount: String(selectedTransaction.amount || ''),
+      type: selectedTransaction.type || 'expense',
+      categoryId: selectedTransaction.categoryId,
+      paymentMethodId: selectedTransaction.paymentMethodId,
+      date: selectedTransaction.date || new Date().toISOString().slice(0, 10),
+      notes: selectedTransaction.notes || ''
+    });
+    setTab('add-transaction');
+  };
+
+  const renderTransactionDetail = () => {
+    if (!selectedTransaction) return null;
+    const categoryName = categoryMap[selectedTransaction.categoryId]?.name || 'Other';
+    const methodName = paymentMap[selectedTransaction.paymentMethodId]?.name || 'Other';
+    const date = new Date(selectedTransaction.date);
+
+    return (
+      <main className="detail-shell">
+        <header className="add-transaction-header">
+          <button type="button" className="back-button" onClick={() => setTab('transactions')} aria-label="Back to transactions">
+            <ArrowLeft size={22} />
+          </button>
+          <h1>Transaction Detail</h1>
+        </header>
+
+        <section className="detail-content">
+          <div className="detail-summary">
+            <span className={`detail-icon ${selectedTransaction.type}`}><Utensils size={26} strokeWidth={1.7} /></span>
+            <h2>{categoryName}</h2>
+            <strong className={selectedTransaction.type}>{selectedTransaction.type === 'income' ? '+' : '-'} {formatCurrency(Number(selectedTransaction.amount || 0))}</strong>
+            <p>{selectedTransaction.type === 'income' ? 'Income' : 'Expense'}</p>
+          </div>
+
+          <section className="detail-card">
+            <div><span>Date</span><strong>{date.toLocaleDateString('en-PK')}</strong></div>
+            <div><span>Time</span><strong>{selectedTransaction.createdAt ? new Date(selectedTransaction.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '02:30 PM'}</strong></div>
+            <div><span>Payment Method</span><strong>{methodName}</strong></div>
+            <div><span>Description</span><strong>{selectedTransaction.title || 'No description'}</strong></div>
+          </section>
+
+          <div className="detail-actions">
+            <button type="button" className="detail-edit-button" onClick={openTransactionEditor}>Edit</button>
+            <button type="button" className="detail-delete-button" onClick={() => setShowDeleteConfirm(true)}><Trash2 size={17} /> Delete</button>
+          </div>
+        </section>
+
+        {showDeleteConfirm && (
+          <div className="delete-overlay" role="presentation">
+            <section className="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+              <h2 id="delete-title">Delete Transaction?</h2>
+              <p>This transaction will be permanently removed.</p>
+              <div className="delete-dialog-actions">
+                <button type="button" className="dialog-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+                <button type="button" className="dialog-delete" onClick={handleDelete}><Trash2 size={17} /> Delete</button>
+              </div>
+            </section>
+          </div>
+        )}
+      </main>
+    );
+  };
 
   const renderAnalytics = () => (
     <div className="stacked-blocks">
@@ -654,7 +776,6 @@ function App() {
             </div>
           </div>
 
-          {/* <p className="loading-message">Loading ...</p> */}
         </section>
       </main>
     );
@@ -663,7 +784,6 @@ function App() {
   if (preferences && !preferences.onboardingCompleted) {
     return (
       <main className="onboarding-shell">
-        {/* <div className="onboarding-brand">PWS</div> */}
         <section className="onboarding-content">
           <div className="onboarding-hero">
             <span className="onboarding-icon"><WalletCards size={100} strokeWidth={1.75} /></span>
@@ -690,9 +810,7 @@ function App() {
               <ShieldCheck size={24} />
               <div>
                 <strong>Your data stays on this device</strong>
-                <span>Works offline. 
-                  {/* No account required. Export a backup regularly to keep your records safe. */}
-                  </span>
+                <span>Works offline.</span>
               </div>
             </div>
 
@@ -706,13 +824,18 @@ function App() {
     );
   }
 
+  if (tab === 'add-transaction') {
+    return renderAddTransaction();
+  }
+
+  if (tab === 'transaction-detail') {
+    return renderTransactionDetail();
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Good morning</p>
-          <h1>PWS V1</h1>
-        </div>
+        <h1>{tab === 'transactions' ? 'Transactions' : tab === 'analytics' ? 'Analytics' : tab === 'budget' ? 'Budget' : tab === 'more' ? 'More' : 'Home'}</h1>
         <div className="topbar-actions">
           <button
             type="button"

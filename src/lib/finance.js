@@ -44,24 +44,8 @@ export function validateTransaction(formValues) {
   const amount = Number(formValues.amount || 0);
   const errors = [];
 
-  if (!formValues.title || !formValues.title.trim()) {
-    errors.push('Title is required.');
-  }
-
   if (!Number.isFinite(amount) || amount <= 0) {
     errors.push('Amount must be greater than zero.');
-  }
-
-  if (!formValues.categoryId) {
-    errors.push('Select a category.');
-  }
-
-  if (!formValues.paymentMethodId) {
-    errors.push('Select a payment method.');
-  }
-
-  if (!formValues.date) {
-    errors.push('Date is required.');
   }
 
   return {
