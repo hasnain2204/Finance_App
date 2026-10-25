@@ -1,5 +1,6 @@
 import { defaultCategories, defaultPaymentMethods } from '../data/defaultData';
 import { addSyncIdentities, getSyncIdentityReport, isSyncId } from '../services/syncIdentity';
+import { enqueueRestoreDiff } from '../services/financeSyncQueue';
 
 export function toPaisa(value) {
   return Math.round(Number(value || 0) * 100);
@@ -590,15 +591,21 @@ export async function restoreBackupData(database, backup) {
     budgetHistory: backup.budgetHistory,
     preferences: backup.preferences || []
   });
-  await database.transaction(
-    'rw',
+  const transactionTables = [
     database.transactions,
     database.categories,
     database.paymentMethods,
     database.budgets,
     database.budgetHistory,
     database.preferences,
-    async () => {
+    database.syncOutbox,
+    database.syncMetadata,
+    database.syncEntityState
+  ].filter(Boolean);
+  await database.transaction('rw', ...transactionTables, async () => {
+      const before = database.syncOutbox ? Object.fromEntries(await Promise.all([
+        'transactions', 'categories', 'paymentMethods', 'budgets', 'budgetHistory', 'preferences'
+      ].map(async (store) => [store, await database[store].toArray()]))) : null;
       await database.transactions.clear();
       await database.categories.clear();
       await database.paymentMethods.clear();
@@ -612,8 +619,13 @@ export async function restoreBackupData(database, backup) {
       if (data.budgets.length) await database.budgets.bulkPut(data.budgets);
       if (data.budgetHistory.length) await database.budgetHistory.bulkPut(data.budgetHistory);
       if (backup.preferences && data.preferences.length) await database.preferences.bulkPut(data.preferences);
-    }
-  );
+      if (database.syncOutbox) {
+        const after = Object.fromEntries(await Promise.all([
+          'transactions', 'categories', 'paymentMethods', 'budgets', 'budgetHistory', 'preferences'
+        ].map(async (store) => [store, await database[store].toArray()])));
+        await enqueueRestoreDiff(database, before, after);
+      }
+    });
   return data.syncIdentityReport;
 }
 

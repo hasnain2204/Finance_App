@@ -10,6 +10,7 @@ import {
   syncIdentityStores
 } from './syncIdentity';
 import { createMigrationVerificationReport } from './migrationVerification';
+import { enqueueRestoreDiff } from './financeSyncQueue';
 
 const tableNames = [
   'transactions',
@@ -227,10 +228,14 @@ export async function importBackupToNativeSqlite(database, backupSource, { repla
   ];
 
   let verificationReport;
+  const syncTables = ['syncOutbox', 'syncMetadata', 'syncEntityState']
+    .map((name) => database[name]).filter(Boolean);
   await database.transaction(
     'rw',
     ...tableNames.map((name) => database[name]),
+    ...syncTables,
     async () => {
+      const before = await readDatabaseCollections(database);
       const existingCounts = await readDatabaseCounts(database);
       const existingRecordCount = Object.values(existingCounts).reduce((total, count) => total + count, 0);
       if (existingRecordCount > 0 && replaceExisting !== true) {
@@ -268,6 +273,7 @@ export async function importBackupToNativeSqlite(database, backupSource, { repla
         error.verificationReport = verificationReport;
         throw error;
       }
+      if (database.syncOutbox) await enqueueRestoreDiff(database, before, destinationData);
     }
   );
 

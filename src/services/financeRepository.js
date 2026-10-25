@@ -13,6 +13,13 @@ import {
 } from './syncIdentity';
 import { createNativeSqliteAdapter, seedNativeSqliteDatabase } from './nativeSqliteAdapter';
 import { importBackupToNativeSqlite } from './nativeBackupMigration';
+import { enqueueLocalMutation } from './financeSyncQueue';
+
+const syncTransactionTables = (database) => [
+  database.syncOutbox,
+  database.syncMetadata,
+  database.syncEntityState
+];
 
 export function createFinanceRepository(database, seed) {
   const useNativeSqlite = database?.adapterType === 'native-sqlite' || (!database && Capacitor.isNativePlatform());
@@ -20,12 +27,17 @@ export function createFinanceRepository(database, seed) {
   seed ||= useNativeSqlite ? () => seedNativeSqliteDatabase(database) : seedDatabase;
   const setActiveBudget = async (month, categoryId, amount) => {
     const id = `budget-${month}-${categoryId}`;
+    const existing = await database.budgets.get(id);
     if (amount === null) {
+      if (existing && id !== 'budget-all-overall') {
+        const deletable = existing.syncId ? existing : { ...existing, syncId: createSyncId() };
+        if (deletable !== existing) await database.budgets.put(deletable);
+        await enqueueLocalMutation(database, { collection: 'budgets', operation: 'delete', record: deletable });
+      }
       await database.budgets.delete(id);
     } else {
-      const existing = await database.budgets.get(id);
       const category = categoryId === 'overall' ? null : await database.categories.get(categoryId);
-      await database.budgets.put({
+      const nextBudget = {
         ...existing,
         id,
         categoryId,
@@ -35,7 +47,11 @@ export function createFinanceRepository(database, seed) {
         ...(categoryId === 'overall'
           ? { syncRole: 'derived' }
           : { categorySyncId: category?.syncId || existing?.categorySyncId || null })
-      });
+      };
+      await database.budgets.put(nextBudget);
+      if (id !== 'budget-all-overall') {
+        await enqueueLocalMutation(database, { collection: 'budgets', operation: 'upsert', record: nextBudget });
+      }
     }
   };
 
@@ -61,16 +77,45 @@ export function createFinanceRepository(database, seed) {
   };
 
   return {
+    syncStorage: database,
+    getSyncStorage() { return database; },
     async loadData() {
       await seed();
-      const [transactions, categories, paymentMethods, budgets, budgetHistory, preferences] = await Promise.all([
+      const [allTransactions, allCategories, allPaymentMethods, allBudgets, allBudgetHistory, allPreferences,
+        syncEntityStates, syncConflicts] = await Promise.all([
         database.transactions.orderBy('date').reverse().toArray(),
         database.categories.orderBy('name').toArray(),
         database.paymentMethods.orderBy('name').toArray(),
         database.budgets.toArray(),
         database.budgetHistory.toArray(),
-        database.preferences.get('app')
+        database.preferences.get('app'),
+        database.syncEntityState.toArray(),
+        database.syncConflicts.toArray()
       ]);
+
+      const unresolvedEntities = new Set(syncConflicts
+        .filter((conflict) => conflict.status === 'unresolved')
+        .flatMap((conflict) => [
+          `${conflict.collection}:${conflict.syncId}`,
+          ...(conflict.remotePayload?.sync_id
+            ? [`${conflict.collection}:${conflict.remotePayload.sync_id}`]
+            : [])
+        ]));
+      const tombstonedEntities = new Set(syncEntityStates
+        .filter((state) => state.deletedAt)
+        .filter((state) => !unresolvedEntities.has(`${state.collection}:${state.syncId}`))
+        .map((state) => `${state.collection}:${state.syncId}`));
+      const visible = (collection, records) => records.filter((record) => (
+        !tombstonedEntities.has(`${collection}:${record.syncId}`)
+      ));
+      const transactions = visible('transactions', allTransactions);
+      const categories = visible('categories', allCategories);
+      const paymentMethods = visible('paymentMethods', allPaymentMethods);
+      const budgets = visible('budgets', allBudgets);
+      const budgetHistory = visible('budgetHistory', allBudgetHistory);
+      const preferences = allPreferences && !tombstonedEntities.has(`preferences:${allPreferences.syncId}`)
+        ? allPreferences
+        : undefined;
 
       let loadedBudgets = budgets;
       if (!loadedBudgets.some((budget) => budget.id === 'budget-all-overall')) {
@@ -97,21 +142,30 @@ export function createFinanceRepository(database, seed) {
         budgetHistory,
         preferences,
         syncIdentityReport: getSyncIdentityReport({
-          transactions,
-          categories,
-          paymentMethods,
-          budgets: loadedBudgets,
-          budgetHistory,
-          preferences: preferences ? [preferences] : []
+          transactions: allTransactions,
+          categories: allCategories,
+          paymentMethods: allPaymentMethods,
+          budgets: allBudgets,
+          budgetHistory: allBudgetHistory,
+          preferences: allPreferences ? [allPreferences] : []
         })
       };
     },
 
     async savePreferences(preferences) {
-      const existing = await database.preferences.get(preferences.id);
-      return database.preferences.put({
-        ...preferences,
-        syncId: preferences.syncId || existing?.syncId || createSyncId()
+      return database.transaction('rw', database.preferences, ...syncTransactionTables(database), async () => {
+        const existing = await database.preferences.get(preferences.id);
+        const nextPreferences = {
+          ...preferences,
+          syncId: preferences.syncId || existing?.syncId || createSyncId()
+        };
+        const result = await database.preferences.put(nextPreferences);
+        await enqueueLocalMutation(database, {
+          collection: 'preferences',
+          operation: 'upsert',
+          record: nextPreferences
+        });
+        return result;
       });
     },
 
@@ -121,6 +175,7 @@ export function createFinanceRepository(database, seed) {
         database.transactions,
         database.categories,
         database.paymentMethods,
+        ...syncTransactionTables(database),
         async () => {
           const [existing, category, paymentMethod] = await Promise.all([
             id ? database.transactions.get(id) : null,
@@ -133,14 +188,25 @@ export function createFinanceRepository(database, seed) {
             categorySyncId: category?.syncId || transaction.categorySyncId || null,
             paymentMethodSyncId: paymentMethod?.syncId || transaction.paymentMethodSyncId || null
           };
-          if (id) return database.transactions.update(id, nextTransaction);
-          return database.transactions.add(nextTransaction);
+          if (id) {
+            const result = await database.transactions.update(id, nextTransaction);
+            if (result) await enqueueLocalMutation(database, {
+              collection: 'transactions', operation: 'upsert', record: { ...existing, ...nextTransaction, id }
+            });
+            return result;
+          }
+          const createdId = await database.transactions.add(nextTransaction);
+          await enqueueLocalMutation(database, {
+            collection: 'transactions', operation: 'upsert', record: { ...nextTransaction, id: createdId }
+          });
+          return createdId;
         }
       );
     },
 
     async saveBudgetHistory({ id, month, budgetCategory, date, amount, description, timestamp = new Date() }) {
-      await database.transaction('rw', database.budgets, database.budgetHistory, database.categories, async () => {
+      await database.transaction('rw', database.budgets, database.budgetHistory, database.categories,
+        ...syncTransactionTables(database), async () => {
         const existingHistory = id ? await database.budgetHistory.get(id) : null;
         if (id && !existingHistory) {
           throw new Error('Budget history entry no longer exists.');
@@ -179,6 +245,9 @@ export function createFinanceRepository(database, seed) {
           }
           historyEntry.previousAmount = oldMonth === month ? oldMonthBudget?.amount ?? null : null;
           await database.budgetHistory.put(historyEntry);
+          await enqueueLocalMutation(database, {
+            collection: 'budgetHistory', operation: 'upsert', record: historyEntry
+          });
           await setActiveBudget(month, categoryId, amount);
           await recalculateCumulativeBudget();
           return;
@@ -205,6 +274,7 @@ export function createFinanceRepository(database, seed) {
               amount,
               description: description.trim(),
               createdAt: timestamp.toISOString(),
+              syncId: existingHistory.syncId || createSyncId(),
               entryType: 'addition'
             }
           : {
@@ -213,7 +283,11 @@ export function createFinanceRepository(database, seed) {
               budgetCategory,
               entryType: 'addition'
             };
-        await database.budgetHistory[existingHistory ? 'put' : 'add'](historyEntry);
+        const historyId = await database.budgetHistory[existingHistory ? 'put' : 'add'](historyEntry);
+        const savedHistoryEntry = { ...historyEntry, id: historyId };
+        await enqueueLocalMutation(database, {
+          collection: 'budgetHistory', operation: 'upsert', record: savedHistoryEntry
+        });
         await database.budgets.put({
           id: 'budget-all-overall',
           categoryId: 'overall',
@@ -227,12 +301,24 @@ export function createFinanceRepository(database, seed) {
 
     async deleteTransactionOrBudgetHistory(record) {
       if (record.historyType !== 'budget') {
-        await database.transactions.delete(record.id);
+        await database.transaction('rw', database.transactions, ...syncTransactionTables(database), async () => {
+          const transaction = await database.transactions.get(record.id);
+          if (!transaction) return;
+          const deletable = transaction.syncId ? transaction : { ...transaction, syncId: createSyncId() };
+          if (deletable !== transaction) await database.transactions.put(deletable);
+          await enqueueLocalMutation(database, {
+            collection: 'transactions', operation: 'delete', record: deletable
+          });
+          await database.transactions.delete(record.id);
+        });
         return;
       }
 
       const categoryId = record.categoryId || 'overall';
-      await database.transaction('rw', database.budgets, database.budgetHistory, database.categories, async () => {
+      await database.transaction('rw', database.budgets, database.budgetHistory, database.categories,
+        ...syncTransactionTables(database), async () => {
+        const historyEntry = await database.budgetHistory.get(record.id);
+        if (!historyEntry) return;
         if (record.entryType !== 'addition') {
           const remainingHistory = await database.budgetHistory
             .where('month').equals(record.month)
@@ -246,9 +332,14 @@ export function createFinanceRepository(database, seed) {
           await setActiveBudget(
             record.month,
             categoryId,
-            remainingHistory.length ? remainingHistory[0].amount : record.previousAmount ?? null
+            remainingHistory.length ? remainingHistory[0].amount : historyEntry.previousAmount ?? record.previousAmount ?? null
           );
         }
+        const deletable = historyEntry.syncId ? historyEntry : { ...historyEntry, syncId: createSyncId() };
+        if (deletable !== historyEntry) await database.budgetHistory.put(deletable);
+        await enqueueLocalMutation(database, {
+          collection: 'budgetHistory', operation: 'delete', record: deletable
+        });
         await database.budgetHistory.delete(record.id);
         await recalculateCumulativeBudget();
       });
@@ -256,11 +347,27 @@ export function createFinanceRepository(database, seed) {
 
     createCategory(category) {
       const syncId = getCanonicalSyncId('categories', category.id) || category.syncId || createSyncId();
-      return database.categories.add({ ...category, syncId });
+      return database.transaction('rw', database.categories, ...syncTransactionTables(database), async () => {
+        const nextCategory = { ...category, syncId };
+        const id = await database.categories.add(nextCategory);
+        await enqueueLocalMutation(database, {
+          collection: 'categories', operation: 'upsert', record: { ...nextCategory, id }
+        });
+        return id;
+      });
     },
 
     async updateCategory(id, name) {
-      return Boolean(await database.categories.update(id, { name }));
+      return database.transaction('rw', database.categories, ...syncTransactionTables(database), async () => {
+        const existing = await database.categories.get(id);
+        if (!existing) return false;
+        const nextCategory = { ...existing, name, syncId: existing.syncId || createSyncId() };
+        await database.categories.put(nextCategory);
+        await enqueueLocalMutation(database, {
+          collection: 'categories', operation: 'upsert', record: nextCategory
+        });
+        return true;
+      });
     },
 
     async deleteCategory(id) {
@@ -270,6 +377,7 @@ export function createFinanceRepository(database, seed) {
         database.transactions,
         database.budgetHistory,
         database.budgets,
+        ...syncTransactionTables(database),
         async () => {
           const [transaction, historyEntry, budget] = await Promise.all([
             database.transactions.where('categoryId').equals(id).first(),
@@ -277,6 +385,10 @@ export function createFinanceRepository(database, seed) {
             database.budgets.where('categoryId').equals(id).first()
           ]);
           if (transaction || historyEntry || budget) return false;
+          const category = await database.categories.get(id);
+          if (category) await enqueueLocalMutation(database, {
+            collection: 'categories', operation: 'delete', record: category
+          });
           await database.categories.delete(id);
           return true;
         }
@@ -285,17 +397,38 @@ export function createFinanceRepository(database, seed) {
 
     createPaymentMethod(paymentMethod) {
       const syncId = getCanonicalSyncId('paymentMethods', paymentMethod.id) || paymentMethod.syncId || createSyncId();
-      return database.paymentMethods.add({ ...paymentMethod, syncId });
+      return database.transaction('rw', database.paymentMethods, ...syncTransactionTables(database), async () => {
+        const nextPaymentMethod = { ...paymentMethod, syncId };
+        const id = await database.paymentMethods.add(nextPaymentMethod);
+        await enqueueLocalMutation(database, {
+          collection: 'paymentMethods', operation: 'upsert', record: { ...nextPaymentMethod, id }
+        });
+        return id;
+      });
     },
 
     async updatePaymentMethod(id, name) {
-      return Boolean(await database.paymentMethods.update(id, { name }));
+      return database.transaction('rw', database.paymentMethods, ...syncTransactionTables(database), async () => {
+        const existing = await database.paymentMethods.get(id);
+        if (!existing) return false;
+        const nextPaymentMethod = { ...existing, name, syncId: existing.syncId || createSyncId() };
+        await database.paymentMethods.put(nextPaymentMethod);
+        await enqueueLocalMutation(database, {
+          collection: 'paymentMethods', operation: 'upsert', record: nextPaymentMethod
+        });
+        return true;
+      });
     },
 
     async deletePaymentMethod(id) {
-      return database.transaction('rw', database.paymentMethods, database.transactions, async () => {
+      return database.transaction('rw', database.paymentMethods, database.transactions,
+        ...syncTransactionTables(database), async () => {
         const transaction = await database.transactions.where('paymentMethodId').equals(id).first();
         if (transaction) return false;
+        const paymentMethod = await database.paymentMethods.get(id);
+        if (paymentMethod) await enqueueLocalMutation(database, {
+          collection: 'paymentMethods', operation: 'delete', record: paymentMethod
+        });
         await database.paymentMethods.delete(id);
         return true;
       });

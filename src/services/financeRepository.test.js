@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createFinanceRepository } from './financeRepository';
 import { isSyncId } from './syncIdentity';
 
-function createTable(initialRows = []) {
+function createTable(initialRows = [], keyField = 'id') {
   let rows = [...initialRows];
   let nextId = Math.max(0, ...rows.map((row) => Number(row.id) || 0)) + 1;
 
@@ -15,15 +15,15 @@ function createTable(initialRows = []) {
 
   const table = {
     add: async (record) => {
-      const row = { ...record, ...(record.id === undefined ? { id: nextId++ } : {}) };
+      const row = { ...record, ...(keyField === 'id' && record.id === undefined ? { id: nextId++ } : {}) };
       rows.push(row);
       return row.id;
     },
     bulkPut: async (records) => Promise.all(records.map((record) => table.put(record))),
     clear: async () => { rows = []; },
     count: async () => rows.length,
-    delete: async (id) => { rows = rows.filter((row) => row.id !== id); },
-    get: async (id) => rows.find((row) => row.id === id),
+    delete: async (id) => { rows = rows.filter((row) => row[keyField] !== id); },
+    get: async (id) => rows.find((row) => row[keyField] === id),
     orderBy: (index) => ({
       reverse: () => ({
         toArray: async () => [...rows].sort((a, b) => String(b[index]).localeCompare(String(a[index])))
@@ -31,14 +31,14 @@ function createTable(initialRows = []) {
       toArray: async () => [...rows].sort((a, b) => String(a[index]).localeCompare(String(b[index])))
     }),
     put: async (record) => {
-      const index = rows.findIndex((row) => row.id === record.id);
+      const index = rows.findIndex((row) => row[keyField] === record[keyField]);
       if (index === -1) rows.push(record);
       else rows[index] = record;
-      return record.id;
+      return record[keyField];
     },
     toArray: async () => [...rows],
     update: async (id, changes) => {
-      const index = rows.findIndex((row) => row.id === id);
+      const index = rows.findIndex((row) => row[keyField] === id);
       if (index === -1) return 0;
       rows[index] = { ...rows[index], ...changes };
       return 1;
@@ -59,6 +59,10 @@ function createDatabase(initialData = {}) {
     budgets: createTable(initialData.budgets),
     budgetHistory: createTable(initialData.budgetHistory),
     preferences: createTable(initialData.preferences),
+    syncOutbox: createTable(initialData.syncOutbox),
+    syncConflicts: createTable(initialData.syncConflicts),
+    syncMetadata: createTable(initialData.syncMetadata, 'key'),
+    syncEntityState: createTable(initialData.syncEntityState),
     transactionModes: [],
     transaction: async function (mode, ...args) {
       this.transactionModes.push(mode);

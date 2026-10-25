@@ -1746,7 +1746,7 @@ function App() {
         </article>
         <article className="help-faq-item">
           <h2>Can I use PWS offline?</h2>
-          <p>Yes. Record transactions without an internet connection. Your data stays on this device.</p>
+          <p>Yes. Record transactions without an internet connection. They are saved locally; cloud transfer waits until you configure an account and confirm the sync preview.</p>
         </article>
         <article className="help-faq-item">
           <h2>How do I keep my data safe?</h2>
@@ -1754,7 +1754,7 @@ function App() {
         </article>
         <article className="help-faq-item">
           <h2>Can I sync or change currency?</h2>
-          <p>Cloud Sync is coming later. PWS V1 uses PKR only.</p>
+          <p>Cloud sync is available from More → Cloud account after Supabase is configured and the initial merge is confirmed. PWS V1 uses PKR only.</p>
         </article>
       </section>
     </main>
@@ -2367,7 +2367,7 @@ function App() {
   if (tab === 'cloud-account') {
     return (
       <Suspense fallback={<main className="account-shell" role="status">Loading account tools…</main>}>
-        <CloudAccountPanel onBack={() => setTab('more')} />
+        <CloudAccountPanel repository={financeRepository} onDataChanged={loadData} onBack={() => setTab('more')} />
       </Suspense>
     );
   }

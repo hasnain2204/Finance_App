@@ -1,6 +1,6 @@
 import Dexie from 'dexie';
 import { defaultCategories, defaultPaymentMethods } from '../data/defaultData';
-import { createSyncId, migrateSyncIdentities } from '../services/syncIdentity';
+import { createSyncId, getCanonicalSyncId, migrateSyncIdentities } from '../services/syncIdentity';
 
 export const db = new Dexie('pws-v1-db');
 
@@ -62,6 +62,19 @@ db.version(5).stores({
   preferences: 'id, syncId'
 }).upgrade(migrateSyncIdentities);
 
+db.version(6).stores({
+  transactions: '++id, type, categoryId, paymentMethodId, date, amount, title, syncId, categorySyncId, paymentMethodSyncId',
+  categories: 'id, name, type, syncId',
+  paymentMethods: 'id, name, syncId',
+  budgets: 'id, categoryId, month, syncId, categorySyncId',
+  budgetHistory: '++id, month, categoryId, date, createdAt, syncId, categorySyncId',
+  preferences: 'id, syncId',
+  syncOutbox: 'id, collection, syncId, ownerUserId, authUserAtWrite, status, nextAttemptAt, createdAt, [collection+syncId], [ownerUserId+status+nextAttemptAt]',
+  syncConflicts: 'id, collection, syncId, ownerUserId, status, createdAt, [ownerUserId+status]',
+  syncMetadata: 'key',
+  syncEntityState: 'id, collection, syncId, revision, deletedAt, updatedAt, [collection+syncId]'
+});
+
 export async function seedDatabase() {
   const categoryCount = await db.categories.count();
   const paymentCount = await db.paymentMethods.count();
@@ -77,7 +90,7 @@ export async function seedDatabase() {
   if (prefsCount === 0) {
     await db.preferences.put({
       id: 'app',
-      syncId: createSyncId(),
+      syncId: getCanonicalSyncId('preferences', 'app') || createSyncId(),
       currency: 'PKR',
       lightMode: true,
       dateFormat: 'DD MMM YYYY',

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabaseClient, supabaseConfiguration } from './supabaseClient';
+import { setActiveAuthUserSnapshot } from './financeSyncQueue';
 
 const initialSessionState = {
   session: null,
@@ -63,11 +64,20 @@ export function useSupabaseAuth(client = supabaseClient, configuration = supabas
 
   useEffect(() => {
     if (!client) {
+      setActiveAuthUserSnapshot(null);
       setSessionState({ ...initialSessionState, loading: false });
       return undefined;
     }
+    setActiveAuthUserSnapshot(null);
     setSessionState({ ...initialSessionState, loading: true });
-    return observeAuthSession(client, setSessionState);
+    const stopObserving = observeAuthSession(client, (nextState) => {
+      setActiveAuthUserSnapshot(nextState.user?.id || null);
+      setSessionState(nextState);
+    });
+    return () => {
+      stopObserving();
+      setActiveAuthUserSnapshot(null);
+    };
   }, [client]);
 
   const runAuthAction = useCallback(async (operation, successMessage) => {
@@ -100,7 +110,7 @@ export function useSupabaseAuth(client = supabaseClient, configuration = supabas
 
   const signIn = useCallback((email, password) => runAuthAction(
     () => client.auth.signInWithPassword({ email: email.trim(), password }),
-    'Signed in. Finance records remain local; cloud transfer is not enabled yet.'
+    'Signed in. Review the sync preview before any finance records are transferred.'
   ), [client, runAuthAction]);
 
   const signOut = useCallback(() => runAuthAction(

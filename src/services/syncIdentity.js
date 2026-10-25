@@ -11,7 +11,10 @@ export const syncIdentityStores = [
 
 const canonicalIdsByStore = {
   categories: new Map(defaultCategories.map(({ id, syncId }) => [id, syncId])),
-  paymentMethods: new Map(defaultPaymentMethods.map(({ id, syncId }) => [id, syncId]))
+  paymentMethods: new Map(defaultPaymentMethods.map(({ id, syncId }) => [id, syncId])),
+  // A fresh device must start with the same account-preferences identity.
+  // Existing valid IDs are preserved by addSyncIdentities and are never rewritten.
+  preferences: new Map([['app', 'f1a00000-0000-4000-8000-00000000000f']])
 };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

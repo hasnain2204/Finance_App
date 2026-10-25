@@ -76,7 +76,7 @@ describe('sync identity migration', () => {
       ['paymentMethods', defaultPaymentMethods.map(({ id, name }) => ({ id, name }))],
       ['budgets', []],
       ['budgetHistory', []],
-      ['preferences', []]
+      ['preferences', [{ id: 'app' }]]
     ]);
     const identified = addSyncIdentities(identities);
 
@@ -84,5 +84,6 @@ describe('sync identity migration', () => {
       .toEqual(defaultCategories.map(({ syncId }) => syncId));
     expect(identified.paymentMethods.map(({ syncId }) => syncId))
       .toEqual(defaultPaymentMethods.map(({ syncId }) => syncId));
+    expect(identified.preferences[0].syncId).toBe('f1a00000-0000-4000-8000-00000000000f');
   });
 });

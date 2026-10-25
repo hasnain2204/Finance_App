@@ -1,6 +1,6 @@
-# Supabase Phase 4 setup
+# Supabase setup: authentication and offline-first sync
 
-This phase adds email/password authentication and a PostgreSQL schema foundation. It does not sync finance records. Local Dexie/SQLite behavior remains the source of finance data until a later sync phase.
+The Phase 4 migration adds email/password authentication and the six user-owned PostgreSQL tables. The Phase 5 migration adds compare-and-swap revisions, idempotent sync RPCs, and tombstone-aware incremental pulls. Local Dexie/SQLite remains the source of finance data while the sync flow is unconfigured or not confirmed by the user.
 
 ## Apply the migration
 
@@ -41,11 +41,50 @@ The migration links transaction/category/payment references by `(user_id, sync_i
 3. In **Authentication → URL Configuration**, set the Site URL to the app's real return address and add only the development/production origins you use to the Redirect URLs allowlist. For local browser testing, use the actual local origin (for example `http://localhost:5173`); a LAN device uses its current LAN origin. Native email-confirmation deep-link routing is not configured in this phase.
 4. Open the project's **Connect** dialog or **Settings → API Keys** and copy the Project URL and a **publishable** key. A publishable key is expected to be visible in browser/mobile code; never use a `sb_secret_` or legacy `service_role` key here.
 5. Copy `.env.example` to `.env.local`, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, then restart Vite with `npm run dev`. `.env.local` is ignored by Git.
-6. Open **More → Cloud account** and test sign-up, email confirmation (if enabled), sign-in, session restoration, and sign-out. Cloud account state does not gate local finance features.
+6. Open **More → Cloud account** and test sign-up, email confirmation (if enabled), sign-in, session restoration, and sign-out. Local finance remains available offline and while signed out.
+
+## Apply Phase 5 sync migration
+
+After applying and verifying the Phase 4 migration above:
+
+1. In **SQL Editor**, run the complete contents of [`migrations/20261026000200_finance_sync_queue.sql`](./migrations/20261026000200_finance_sync_queue.sql) once. It is additive: it adds a `revision` column to the six existing tables, creates the unexposed `private.finance_sync_operations` idempotency ledger, and installs three RPCs. It does not copy, clear, or rewrite finance rows.
+2. Confirm `revision` exists on all six public tables. Confirm RLS remains enabled and the existing authenticated owner policies remain present.
+3. Confirm `pws_sync_preview`, `pws_sync_pull`, and `pws_sync_apply` are executable by `authenticated` and not by `anon` or `PUBLIC`. `pws_sync_apply` uses a pinned empty search path, checks `auth.uid()`, and handles writes and revisions in one database transaction.
+4. Confirm authenticated users no longer have direct INSERT, UPDATE, or DELETE privileges on the six tables. Sync writes must go through `pws_sync_apply`; reads remain protected by the existing RLS policies.
+5. Set the project URL and publishable key in `.env.local`, restart Vite, then sign in to the app. **Review initial sync** calls the remote preview and shows local/account counts. Nothing transfers until **Confirm merge and sync** is selected.
+6. Test with a disposable account and non-financial sample rows first. Verify first upload, a second device pull, a concurrent edit conflict, selecting each conflict resolution, delete propagation, offline queueing/reconnect, retry after a forced network failure, and account switching. Verify each user's RPC results contain only that user's records.
+
+Useful Dashboard checks after migration:
+
+```sql
+SELECT table_name, column_name, data_type, column_default
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name IN (
+    'transactions', 'categories', 'payment_methods',
+    'budgets', 'budget_history', 'preferences'
+  )
+  AND column_name = 'revision'
+ORDER BY table_name;
+
+SELECT p.proname, p.proconfig,
+       has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_can_execute,
+       has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_can_execute,
+       EXISTS (
+         SELECT 1
+         FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) AS privilege
+         WHERE privilege.grantee = 0 AND privilege.privilege_type = 'EXECUTE'
+       ) AS public_can_execute
+FROM pg_proc AS p
+JOIN pg_namespace AS n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname IN ('pws_sync_preview', 'pws_sync_pull', 'pws_sync_apply')
+ORDER BY p.proname;
+```
 
 ## Security and verification status
 
 - RLS is the database boundary; the publishable key itself does not protect records. The SQL migration grants authenticated users only their permitted operations, and policies bind every row to `auth.uid()`.
 - `user_id` and `sync_id` are not updateable by normal authenticated clients. The migration also restricts updates to data columns, while an update trigger maintains `updated_at`.
 - Do not add service-role credentials to `.env.local`, any `VITE_*` variable, source code, or a shipped Android build.
-- No real Supabase project has been configured or tested by this repository change. Apply the migration and perform the Dashboard/client checks above before treating cloud authentication or database policies as verified.
+- The local workspace currently has no `.env.local`, project URL, publishable key, or Supabase CLI project configuration. Live RPC, RLS, and two-device tests are therefore pending. Do not treat this foundation as production-verified until the Dashboard and disposable-account checks above pass.

@@ -1,5 +1,5 @@
 import { defaultCategories, defaultPaymentMethods } from '../data/defaultData';
-import { createSyncId } from './syncIdentity';
+import { createSyncId, getCanonicalSyncId } from './syncIdentity';
 import { initializeNativeSqlite } from './nativeSqlite';
 
 const stores = {
@@ -52,6 +52,44 @@ const stores = {
       ['name', 'name'], ['onboardingCompleted', 'onboarding_completed'],
       ['dateFormat', 'date_format'], ['notificationsEnabled', 'notifications_enabled']
     ]
+  },
+  syncOutbox: {
+    table: 'sync_outbox',
+    key: 'id',
+    jsonFields: ['payload'],
+    fields: [
+      ['id', 'id'], ['idempotencyKey', 'idempotency_key'], ['collection', 'collection'],
+      ['syncId', 'sync_id'], ['operation', 'operation'], ['ownerUserId', 'owner_user_id'],
+      ['authUserAtWrite', 'auth_user_at_write'], ['baseRevision', 'base_revision'], ['payload', 'payload_json'], ['createdAt', 'created_at'],
+      ['updatedAt', 'updated_at'], ['attempts', 'attempts'], ['nextAttemptAt', 'next_attempt_at'],
+      ['status', 'status'], ['lastError', 'last_error']
+    ]
+  },
+  syncConflicts: {
+    table: 'sync_conflicts',
+    key: 'id',
+    jsonFields: ['localPayload', 'remotePayload'],
+    fields: [
+      ['id', 'id'], ['collection', 'collection'], ['syncId', 'sync_id'],
+      ['ownerUserId', 'owner_user_id'], ['localPayload', 'local_payload_json'],
+      ['remotePayload', 'remote_payload_json'], ['baseRevision', 'base_revision'],
+      ['remoteRevision', 'remote_revision'], ['status', 'status'], ['createdAt', 'created_at'],
+      ['resolvedAt', 'resolved_at']
+    ]
+  },
+  syncMetadata: {
+    table: 'sync_metadata',
+    key: 'key',
+    jsonFields: ['value'],
+    fields: [['key', 'key'], ['value', 'value_json'], ['updatedAt', 'updated_at']]
+  },
+  syncEntityState: {
+    table: 'sync_entity_state',
+    key: 'id',
+    fields: [
+      ['id', 'id'], ['collection', 'collection'], ['syncId', 'sync_id'],
+      ['revision', 'revision'], ['updatedAt', 'updated_at'], ['deletedAt', 'deleted_at']
+    ]
   }
 };
 
@@ -65,6 +103,9 @@ function decodeRecord(storeName, row) {
     if (!(column in row)) continue;
     let value = row[column];
     if (boolFields.has(property)) value = value === null ? undefined : Boolean(value);
+    if (config.jsonFields?.includes(property) && typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { value = null; }
+    }
     if (value !== null || boolFields.has(property)) record[property] = value;
   }
   return record;
@@ -77,6 +118,7 @@ function encodeRecord(storeName, record, { omitAutoId = false } = {}) {
     if (omitAutoId && config.autoIncrement && property === config.key && record[property] === undefined) continue;
     let value = record[property];
     if (boolFields.has(property)) value = value === undefined || value === null ? null : Number(Boolean(value));
+    if (config.jsonFields?.includes(property)) value = JSON.stringify(value ?? null);
     if (value === undefined) value = null;
     values[column] = value;
   }
@@ -231,7 +273,7 @@ export async function seedNativeSqliteDatabase(database) {
   if (await database.preferences.count() === 0) {
     await database.preferences.put({
       id: 'app',
-      syncId: createSyncId(),
+      syncId: getCanonicalSyncId('preferences', 'app') || createSyncId(),
       currency: 'PKR',
       lightMode: true,
       dateFormat: 'DD MMM YYYY',

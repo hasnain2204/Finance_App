@@ -1,5 +1,5 @@
 export const NATIVE_SQLITE_DATABASE_NAME = 'pws-v1-native';
-export const NATIVE_SQLITE_SCHEMA_VERSION = 1;
+export const NATIVE_SQLITE_SCHEMA_VERSION = 2;
 
 const schemaVersion1Statements = [
   `CREATE TABLE IF NOT EXISTS categories (
@@ -84,5 +84,58 @@ export const NATIVE_SQLITE_UPGRADES = [
   {
     toVersion: 1,
     statements: schemaVersion1Statements
+  },
+  {
+    toVersion: 2,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS sync_outbox (
+        id TEXT PRIMARY KEY NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        collection TEXT NOT NULL CHECK (collection IN ('transactions', 'categories', 'paymentMethods', 'budgets', 'budgetHistory', 'preferences')),
+        sync_id TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK (operation IN ('upsert', 'delete')),
+        owner_user_id TEXT,
+        auth_user_at_write TEXT,
+        base_revision INTEGER,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        next_attempt_at TEXT,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'retry', 'syncing', 'synced', 'conflict', 'error', 'superseded')),
+        last_error TEXT
+      );`,
+      `CREATE TABLE IF NOT EXISTS sync_conflicts (
+        id TEXT PRIMARY KEY NOT NULL,
+        collection TEXT NOT NULL CHECK (collection IN ('transactions', 'categories', 'paymentMethods', 'budgets', 'budgetHistory', 'preferences')),
+        sync_id TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        local_payload_json TEXT NOT NULL,
+        remote_payload_json TEXT NOT NULL,
+        base_revision INTEGER,
+        remote_revision INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('unresolved', 'resolved-local', 'resolved-remote')),
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+      );`,
+      `CREATE TABLE IF NOT EXISTS sync_metadata (
+        key TEXT PRIMARY KEY NOT NULL,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );`,
+      `CREATE TABLE IF NOT EXISTS sync_entity_state (
+        id TEXT PRIMARY KEY NOT NULL,
+        collection TEXT NOT NULL CHECK (collection IN ('transactions', 'categories', 'paymentMethods', 'budgets', 'budgetHistory', 'preferences')),
+        sync_id TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+        updated_at TEXT,
+        deleted_at TEXT,
+        UNIQUE (collection, sync_id)
+      );`,
+      'CREATE INDEX IF NOT EXISTS sync_outbox_ready_idx ON sync_outbox(owner_user_id, status, next_attempt_at, created_at);',
+      'CREATE INDEX IF NOT EXISTS sync_outbox_entity_idx ON sync_outbox(collection, sync_id, created_at);',
+      'CREATE INDEX IF NOT EXISTS sync_conflicts_owner_status_idx ON sync_conflicts(owner_user_id, status);',
+      'CREATE INDEX IF NOT EXISTS sync_entity_state_updated_idx ON sync_entity_state(updated_at);'
+    ]
   }
 ];

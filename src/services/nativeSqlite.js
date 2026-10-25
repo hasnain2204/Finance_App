@@ -20,10 +20,19 @@ async function createNativeDatabaseConnection() {
 
   if (consistency.result && connectionExists.result) {
     database = await sqlite.retrieveConnection(NATIVE_SQLITE_DATABASE_NAME, false);
-  } else {
-    if (connectionExists.result) {
-      await sqlite.closeConnection(NATIVE_SQLITE_DATABASE_NAME, false);
+    const currentVersion = await database.getVersion();
+    if (Number(currentVersion.version || 0) >= NATIVE_SQLITE_SCHEMA_VERSION) {
+      const isOpen = await database.isDBOpen();
+      if (!isOpen.result) await database.open();
+      await database.execute('PRAGMA foreign_keys = ON;');
+      return { database, sqlite };
     }
+    await sqlite.closeConnection(NATIVE_SQLITE_DATABASE_NAME, false);
+  } else if (connectionExists.result) {
+    await sqlite.closeConnection(NATIVE_SQLITE_DATABASE_NAME, false);
+  }
+
+  {
     await sqlite.addUpgradeStatement(NATIVE_SQLITE_DATABASE_NAME, NATIVE_SQLITE_UPGRADES);
     database = await sqlite.createConnection(
       NATIVE_SQLITE_DATABASE_NAME,

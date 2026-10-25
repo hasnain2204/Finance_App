@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { observeAuthSession, useSupabaseAuth } from './useSupabaseAuth';
+import { getActiveAuthUserSnapshot } from './financeSyncQueue';
 
 function createAuthClient(initialSession = null) {
   let listener;
@@ -79,6 +80,7 @@ describe('Supabase authentication session handling', () => {
     const { result } = renderHook(() => useSupabaseAuth(client, configuration));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(getActiveAuthUserSnapshot()).toBeNull();
     await act(async () => result.current.signUp(' user@example.com ', 'a-secure-password'));
     expect(client.auth.signUp).toHaveBeenCalledWith({ email: 'user@example.com', password: 'a-secure-password' });
     expect(result.current.message).toContain('Check user@example.com');
@@ -87,11 +89,13 @@ describe('Supabase authentication session handling', () => {
     expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'user@example.com', password: 'a-secure-password' });
     act(() => emit('SIGNED_IN', { user: { id: 'signed-in-user' } }));
     expect(result.current.user.id).toBe('signed-in-user');
+    expect(getActiveAuthUserSnapshot()).toBe('signed-in-user');
 
     await act(async () => result.current.signOut());
     expect(client.auth.signOut).toHaveBeenCalledOnce();
     act(() => emit('SIGNED_OUT', null));
     expect(result.current.user).toBeNull();
+    expect(getActiveAuthUserSnapshot()).toBeNull();
     expect(result.current.message).toContain('local finance data remains');
   });
 
