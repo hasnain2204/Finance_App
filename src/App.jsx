@@ -19,24 +19,21 @@ import {
   Utensils,
   WalletCards
 } from 'lucide-react';
-import { db, seedDatabase } from './db/db';
+import { financeRepository } from './services/financeRepository';
 import { defaultCategories, defaultPaymentMethods } from './data/defaultData';
 import {
-  buildBackupPayload,
   buildMonthlyBudgetTrend,
   buildMonthlyExpenseTrend,
   buildWeeklyBudgetTrend,
   calculateCumulativeBudgetTotal,
   calculateCategoryExpenseTotals,
   calculateExpenseTotal,
-  createBudgetHistoryEntry,
   dateFormatOptions,
   formatDate,
   formatCurrency,
   fromPaisa,
   getLocalDateString,
   parseBackupPayload,
-  restoreBackupData,
   toPaisa,
   validateTransaction
 } from './lib/finance';
@@ -168,29 +165,14 @@ function App() {
 
   const loadData = async () => {
     try {
-      await seedDatabase();
-      const [allTx, allCategories, allMethods, loadedBudgets, allBudgetHistory, appPreferences] = await Promise.all([
-        db.transactions.orderBy('date').reverse().toArray(),
-        db.categories.orderBy('name').toArray(),
-        db.paymentMethods.orderBy('name').toArray(),
-        db.budgets.toArray(),
-        db.budgetHistory.toArray(),
-        db.preferences.get('app')
-      ]);
-      let allBudgets = loadedBudgets;
-      if (!allBudgets.some((budget) => budget.id === 'budget-all-overall')) {
-        const total = calculateCumulativeBudgetTotal(allBudgets, allBudgetHistory);
-        if (total > 0) {
-          const cumulativeBudget = {
-            id: 'budget-all-overall',
-            categoryId: 'overall',
-            month: 'all',
-            amount: total
-          };
-          await db.budgets.put(cumulativeBudget);
-          allBudgets = [...allBudgets, cumulativeBudget];
-        }
-      }
+      const {
+        transactions: allTx,
+        categories: allCategories,
+        paymentMethods: allMethods,
+        budgets: allBudgets,
+        budgetHistory: allBudgetHistory,
+        preferences: appPreferences
+      } = await financeRepository.loadData();
 
       setTransactions(allTx.filter((tx) => tx.type === 'expense').map((tx) => ({ ...tx, amount: fromPaisa(Number(tx.amount || 0)) })));
       setBudgetHistory(allBudgetHistory);
@@ -238,7 +220,7 @@ function App() {
     setIsLoading(true);
     try {
       await Promise.all([
-        db.preferences.put(nextPreferences),
+        financeRepository.savePreferences(nextPreferences),
         new Promise((resolve) => window.setTimeout(resolve, 1150))
       ]);
       setPreferences(nextPreferences);
@@ -264,7 +246,7 @@ function App() {
       notificationsEnabled: preferenceNotificationsDraft
     };
     try {
-      await db.preferences.put(nextPreferences);
+      await financeRepository.savePreferences(nextPreferences);
       setPreferences(nextPreferences);
       setPreferenceSaveStatus({ type: 'success', message: 'Preferences saved.' });
     } catch (error) {
@@ -282,32 +264,6 @@ function App() {
     const { name, value } = event.target;
     setBudgetForm((current) => ({ ...current, [name]: value }));
     setStatus({ type: 'idle', message: '' });
-  };
-
-  const setActiveBudget = async (month, categoryId, amount) => {
-    const id = `budget-${month}-${categoryId}`;
-    if (amount === null) {
-      await db.budgets.delete(id);
-    } else {
-      await db.budgets.put({ id, categoryId, month, amount });
-    }
-  };
-
-  const recalculateCumulativeBudget = async () => {
-    const [allBudgets, allHistory] = await Promise.all([
-      db.budgets.toArray(),
-      db.budgetHistory.toArray()
-    ]);
-    const total = calculateCumulativeBudgetTotal(
-      allBudgets.filter((budget) => budget.id !== 'budget-all-overall'),
-      allHistory
-    );
-    await db.budgets.put({
-      id: 'budget-all-overall',
-      categoryId: 'overall',
-      month: 'all',
-      amount: total
-    });
   };
 
   const handleSaveBudget = async (event) => {
@@ -337,79 +293,14 @@ function App() {
     const paisaAmount = toPaisa(numericAmount);
     const timestamp = new Date();
     try {
-      await db.transaction('rw', db.budgets, db.budgetHistory, async () => {
-        const existingHistory = editingBudgetHistoryId
-          ? await db.budgetHistory.get(editingBudgetHistoryId)
-          : null;
-        if (editingBudgetHistoryId && !existingHistory) {
-          throw new Error('Budget history entry no longer exists.');
-        }
-
-        if (existingHistory && existingHistory.entryType !== 'addition') {
-          const oldMonth = existingHistory.month;
-          const categoryId = existingHistory.categoryId || 'overall';
-          const oldMonthBudget = await db.budgets.get(`budget-${oldMonth}-${categoryId}`);
-          const historyEntry = {
-            ...existingHistory,
-            month,
-            date,
-            amount: paisaAmount,
-            description: description.trim(),
-            createdAt: timestamp.toISOString()
-          };
-          if (oldMonth !== month) {
-            const oldMonthHistory = await db.budgetHistory
-              .where('month').equals(oldMonth)
-              .filter((entry) => entry.id !== existingHistory.id && (entry.categoryId || 'overall') === categoryId && entry.entryType !== 'addition')
-              .toArray();
-            oldMonthHistory.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-            await setActiveBudget(
-              oldMonth,
-              categoryId,
-              oldMonthHistory.length ? oldMonthHistory[0].amount : existingHistory.previousAmount ?? null
-            );
-          }
-          historyEntry.previousAmount = oldMonth === month ? oldMonthBudget?.amount ?? null : null;
-          await db.budgetHistory.put(historyEntry);
-          await setActiveBudget(month, categoryId, paisaAmount);
-          await recalculateCumulativeBudget();
-        } else {
-          const cumulativeBudget = await db.budgets.get('budget-all-overall');
-          const allBudgets = await db.budgets.toArray();
-          const allHistory = await db.budgetHistory.toArray();
-          const currentTotal = cumulativeBudget?.amount ?? calculateCumulativeBudgetTotal(allBudgets, allHistory);
-          const addition = existingHistory
-            ? paisaAmount - Number(existingHistory.amount || 0)
-            : paisaAmount;
-          const entryTotal = existingHistory
-            ? currentTotal - Number(existingHistory.amount || 0)
-            : currentTotal;
-          const historyEntry = existingHistory
-            ? {
-                ...existingHistory,
-                month,
-                categoryId: 'overall',
-                date,
-                budgetCategory,
-                previousAmount: entryTotal,
-                amount: paisaAmount,
-                description: description.trim(),
-                createdAt: timestamp.toISOString(),
-                entryType: 'addition'
-              }
-            : {
-                ...createBudgetHistoryEntry(month, 'overall', currentTotal, paisaAmount, description, date, timestamp),
-                budgetCategory,
-                entryType: 'addition'
-              };
-          await db.budgetHistory[existingHistory ? 'put' : 'add'](historyEntry);
-          await db.budgets.put({
-            id: 'budget-all-overall',
-            categoryId: 'overall',
-            month: 'all',
-            amount: currentTotal + addition
-          });
-        }
+      await financeRepository.saveBudgetHistory({
+        id: editingBudgetHistoryId,
+        month,
+        budgetCategory,
+        date,
+        amount: paisaAmount,
+        description,
+        timestamp
       });
       await loadData();
       setEditingBudgetHistoryId(null);
@@ -458,11 +349,7 @@ function App() {
       createdAt: new Date().toISOString()
     };
 
-    if (editingTransactionId) {
-      await db.transactions.update(editingTransactionId, nextPayload);
-    } else {
-      await db.transactions.add(nextPayload);
-    }
+    await financeRepository.saveTransaction(editingTransactionId, nextPayload);
     setForm({
       ...initialForm,
       categoryId: categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id,
@@ -477,33 +364,7 @@ function App() {
 
   const handleDelete = async () => {
     if (!selectedTransaction?.id) return;
-    if (selectedTransaction.historyType === 'budget') {
-      const entry = selectedTransaction;
-      const month = entry.month;
-      const categoryId = entry.categoryId || 'overall';
-      await db.transaction('rw', db.budgets, db.budgetHistory, async () => {
-        if (entry.entryType !== 'addition') {
-          const remainingHistory = await db.budgetHistory
-            .where('month').equals(month)
-            .filter((historyEntry) => (
-              historyEntry.id !== entry.id &&
-              historyEntry.entryType !== 'addition' &&
-              (historyEntry.categoryId || 'overall') === categoryId
-            ))
-            .toArray();
-          remainingHistory.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-          await setActiveBudget(
-            month,
-            categoryId,
-            remainingHistory.length ? remainingHistory[0].amount : entry.previousAmount ?? null
-          );
-        }
-        await db.budgetHistory.delete(entry.id);
-        await recalculateCumulativeBudget();
-      });
-    } else {
-      await db.transactions.delete(selectedTransaction.id);
-    }
+    await financeRepository.deleteTransactionOrBudgetHistory(selectedTransaction);
     const destination = selectedTransaction.returnTab || 'transactions';
     setShowDeleteConfirm(false);
     setSelectedTransaction(null);
@@ -525,7 +386,7 @@ function App() {
 
     const category = { id: `cat-${Date.now()}`, name: trimmed, type: 'expense' };
     try {
-      await db.categories.put(category);
+      await financeRepository.createCategory(category);
       setCategories((current) => [...current, category]);
       setCategoryInput('');
       setShowAddCategoryForm(false);
@@ -551,7 +412,7 @@ function App() {
       name: trimmed
     };
     try {
-      await db.paymentMethods.put(method);
+      await financeRepository.createPaymentMethod(method);
       setPaymentMethods((current) => [...current, method].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedPaymentMethodId(method.id);
       setPaymentMethodNameDraft(method.name);
@@ -602,7 +463,7 @@ function App() {
     }
 
     try {
-      const updated = await db.paymentMethods.update(selectedPaymentMethodId, { name: methodName });
+      const updated = await financeRepository.updatePaymentMethod(selectedPaymentMethodId, methodName);
       if (!updated) {
         setPaymentMethodEditStatus({ type: 'error', message: 'This payment method no longer exists. Reopen Payment Methods to refresh the list.' });
         return;
@@ -625,15 +486,7 @@ function App() {
     }
 
     try {
-      let isInUse = false;
-      await db.transaction('rw', db.paymentMethods, db.transactions, async () => {
-        const transaction = await db.transactions.where('paymentMethodId').equals(paymentMethodToDelete.id).first();
-        if (transaction) {
-          isInUse = true;
-          return;
-        }
-        await db.paymentMethods.delete(paymentMethodToDelete.id);
-      });
+      const isInUse = !await financeRepository.deletePaymentMethod(paymentMethodToDelete.id);
 
       if (isInUse) {
         setPaymentMethodEditStatus({
@@ -681,7 +534,7 @@ function App() {
     }
 
     try {
-      const updated = await db.categories.update(selectedCategoryId, { name: categoryName });
+      const updated = await financeRepository.updateCategory(selectedCategoryId, categoryName);
       if (!updated) {
         setCategoryEditStatus({ type: 'error', message: 'This category no longer exists. Reopen Account to refresh the list.' });
         return;
@@ -704,19 +557,7 @@ function App() {
     }
 
     try {
-      let isInUse = false;
-      await db.transaction('rw', db.categories, db.transactions, db.budgetHistory, db.budgets, async () => {
-        const [transaction, historyEntry, budget] = await Promise.all([
-          db.transactions.where('categoryId').equals(categoryToDelete.id).first(),
-          db.budgetHistory.where('categoryId').equals(categoryToDelete.id).first(),
-          db.budgets.where('categoryId').equals(categoryToDelete.id).first()
-        ]);
-        if (transaction || historyEntry || budget) {
-          isInUse = true;
-          return;
-        }
-        await db.categories.delete(categoryToDelete.id);
-      });
+      const isInUse = !await financeRepository.deleteCategory(categoryToDelete.id);
 
       if (isInUse) {
         setCategoryEditStatus({
@@ -744,35 +585,7 @@ function App() {
 
   const handleExport = async () => {
     try {
-      const backupData = await db.transaction(
-        'r',
-        db.transactions,
-        db.categories,
-        db.paymentMethods,
-        db.budgets,
-        db.budgetHistory,
-        db.preferences,
-        async () => {
-          const [allTransactions, allCategories, allPaymentMethods, allBudgets, allBudgetHistory, allPreferences] =
-            await Promise.all([
-              db.transactions.toArray(),
-              db.categories.toArray(),
-              db.paymentMethods.toArray(),
-              db.budgets.toArray(),
-              db.budgetHistory.toArray(),
-              db.preferences.toArray()
-            ]);
-          return {
-            transactions: allTransactions,
-            categories: allCategories,
-            paymentMethods: allPaymentMethods,
-            budgets: allBudgets,
-            budgetHistory: allBudgetHistory,
-            preferences: allPreferences
-          };
-        }
-      );
-      const payload = buildBackupPayload(backupData);
+      const payload = await financeRepository.exportBackupPayload();
       const blob = new Blob([payload], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -816,7 +629,7 @@ function App() {
     const { restoreData } = restoreCandidate;
 
     try {
-      await restoreBackupData(db, restoreData);
+      await financeRepository.restoreBackup(restoreData);
       const refreshed = await loadData();
       if (!refreshed) {
         setStatus({
