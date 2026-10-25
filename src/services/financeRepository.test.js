@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFinanceRepository } from './financeRepository';
+import { isSyncId } from './syncIdentity';
 
 function createTable(initialRows = []) {
   let rows = [...initialRows];
@@ -81,16 +82,19 @@ describe('finance repository', () => {
 
     expect(seed).toHaveBeenCalledOnce();
     expect(loaded.transactions).toHaveLength(1);
-    expect(loaded.budgets).toContainEqual({
+    expect(loaded.budgets).toContainEqual(expect.objectContaining({
       id: 'budget-all-overall',
       categoryId: 'overall',
       month: 'all',
-      amount: 750
-    });
+      amount: 750,
+      syncRole: 'derived'
+    }));
+    expect(isSyncId(loaded.budgets.find(({ id }) => id === 'budget-all-overall').syncId)).toBe(true);
   });
 
-  it('adds transactions and updates an existing transaction without changing its ID', async () => {
-    const database = createDatabase({ transactions: [{ id: 14, title: 'Old title' }] });
+  it('adds transactions and preserves local and sync IDs when updating a transaction', async () => {
+    const existingSyncId = '70000000-0000-4000-8000-000000000001';
+    const database = createDatabase({ transactions: [{ id: 14, syncId: existingSyncId, title: 'Old title' }] });
     const repository = createFinanceRepository(database, vi.fn());
 
     const createdId = await repository.saveTransaction(null, { title: 'New transaction', amount: 1234 });
@@ -98,7 +102,13 @@ describe('finance repository', () => {
 
     expect(createdId).toBe(15);
     expect(updatedCount).toBe(1);
-    expect(database.transactions.getRows()).toContainEqual({ id: 14, title: 'Updated title', amount: 5678 });
+    expect(database.transactions.getRows()).toContainEqual(expect.objectContaining({
+      id: 14,
+      syncId: existingSyncId,
+      title: 'Updated title',
+      amount: 5678
+    }));
+    expect(isSyncId(database.transactions.getRows().find(({ id }) => id === createdId).syncId)).toBe(true);
   });
 
   it('saves a budget addition and cumulative total atomically in paisa', async () => {
@@ -123,12 +133,14 @@ describe('finance repository', () => {
       budgetCategory: 'Salary',
       entryType: 'addition'
     });
-    expect(database.budgets.getRows()).toContainEqual({
+    expect(database.budgets.getRows()).toContainEqual(expect.objectContaining({
       id: 'budget-all-overall',
       categoryId: 'overall',
       month: 'all',
-      amount: 12550
-    });
+      amount: 12550,
+      syncRole: 'derived'
+    }));
+    expect(isSyncId(database.budgets.getRows().find(({ id }) => id === 'budget-all-overall').syncId)).toBe(true);
   });
 
   it('deletes budget history and recalculates the cumulative total atomically', async () => {
@@ -160,19 +172,31 @@ describe('finance repository', () => {
 
     expect(database.transactionModes).toEqual(['rw']);
     expect(database.budgetHistory.getRows()).toEqual([]);
-    expect(database.budgets.getRows()).toContainEqual({
+    expect(database.budgets.getRows()).toContainEqual(expect.objectContaining({
       id: 'budget-all-overall',
       categoryId: 'overall',
       month: 'all',
-      amount: 0
-    });
+      amount: 0,
+      syncRole: 'derived'
+    }));
+    expect(isSyncId(database.budgets.getRows().find(({ id }) => id === 'budget-all-overall').syncId)).toBe(true);
   });
 
   it('protects categories referenced by transactions and preserves backup export format', async () => {
+    const categorySyncId = '10000000-0000-4000-8000-000000000001';
+    const paymentMethodSyncId = '20000000-0000-4000-8000-000000000001';
     const database = createDatabase({
-      transactions: [{ id: 1, categoryId: 'cat-food' }],
-      categories: [{ id: 'cat-food', name: 'Food', type: 'expense' }],
-      preferences: [{ id: 'app', currency: 'PKR' }]
+      transactions: [{
+        id: 1,
+        syncId: '30000000-0000-4000-8000-000000000001',
+        categoryId: 'cat-food',
+        categorySyncId: categorySyncId,
+        paymentMethodId: 'pm-cash',
+        paymentMethodSyncId: paymentMethodSyncId
+      }],
+      categories: [{ id: 'cat-food', syncId: categorySyncId, name: 'Food', type: 'expense' }],
+      paymentMethods: [{ id: 'pm-cash', syncId: paymentMethodSyncId, name: 'Cash' }],
+      preferences: [{ id: 'app', syncId: '60000000-0000-4000-8000-000000000001', currency: 'PKR' }]
     });
     const repository = createFinanceRepository(database, vi.fn());
 
@@ -180,31 +204,55 @@ describe('finance repository', () => {
     expect(database.categories.getRows()).toHaveLength(1);
     const backup = JSON.parse(await repository.exportBackupPayload());
     expect(backup).toMatchObject({
-      version: 3,
-      transactions: [{ id: 1, categoryId: 'cat-food' }],
-      categories: [{ id: 'cat-food' }],
-      preferences: [{ id: 'app' }]
+      version: 4,
+      transactions: [{
+        id: 1,
+        syncId: '30000000-0000-4000-8000-000000000001',
+        categoryId: 'cat-food',
+        categorySyncId,
+        paymentMethodSyncId
+      }],
+      categories: [{ id: 'cat-food', syncId: categorySyncId }],
+      paymentMethods: [{ id: 'pm-cash', syncId: paymentMethodSyncId }],
+      preferences: [{ id: 'app', syncId: '60000000-0000-4000-8000-000000000001' }]
     });
     expect(backup.exportedAt).toBeTruthy();
   });
 
-  it('restores a validated backup through the repository boundary', async () => {
+  it('restores a validated v4 backup while preserving stable identities and references', async () => {
     const database = createDatabase({
       transactions: [{ id: 9, title: 'Replace me' }]
     });
     const repository = createFinanceRepository(database, vi.fn());
+    const categorySyncId = '10000000-0000-4000-8000-000000000001';
+    const paymentMethodSyncId = '20000000-0000-4000-8000-000000000001';
     const backup = {
-      transactions: [{ id: 4, title: 'Restored', amount: 250, type: 'expense' }],
-      categories: [],
-      paymentMethods: [],
+      version: 4,
+      transactions: [{
+        id: 4,
+        syncId: '30000000-0000-4000-8000-000000000001',
+        title: 'Restored',
+        amount: 250,
+        type: 'expense',
+        categoryId: 'cat-food',
+        categorySyncId,
+        paymentMethodId: 'pm-cash',
+        paymentMethodSyncId,
+        date: '2026-10-25',
+        notes: ''
+      }],
+      categories: [{ id: 'cat-food', syncId: categorySyncId, name: 'Food', type: 'expense' }],
+      paymentMethods: [{ id: 'pm-cash', syncId: paymentMethodSyncId, name: 'Cash' }],
       budgets: [],
       budgetHistory: [],
-      preferences: null
+      preferences: [{ id: 'app', syncId: '60000000-0000-4000-8000-000000000001', currency: 'PKR' }]
     };
 
     await repository.restoreBackup(backup);
 
     expect(database.transactionModes).toEqual(['rw']);
     expect(database.transactions.getRows()).toEqual(backup.transactions);
+    expect(database.categories.getRows()[0].syncId).toBe(categorySyncId);
+    expect(database.paymentMethods.getRows()[0].syncId).toBe(paymentMethodSyncId);
   });
 });

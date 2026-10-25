@@ -1,0 +1,8 @@
+{
+  "appId": "com.pwsv1.finance",
+  "appName": "PWS V1",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

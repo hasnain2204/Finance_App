@@ -1,4 +1,5 @@
 import { defaultCategories, defaultPaymentMethods } from '../data/defaultData';
+import { addSyncIdentities, getSyncIdentityReport, isSyncId } from '../services/syncIdentity';
 
 export function toPaisa(value) {
   return Math.round(Number(value || 0) * 100);
@@ -243,7 +244,7 @@ function isValidMonthString(value) {
     /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
-function validatePreferences(preferences) {
+function validatePreferences(preferences, validateSyncId = () => {}) {
   if (!Array.isArray(preferences) || !preferences.length) {
     throw new Error('Backup preferences are missing.');
   }
@@ -254,6 +255,7 @@ function validatePreferences(preferences) {
       throw new Error('Backup preferences contain an invalid ID.');
     }
     ids.add(preference.id);
+    validateSyncId(preference, 'preferences');
     if (
       (preference.currency !== undefined && preference.currency !== 'PKR') ||
       (preference.lightMode !== undefined && typeof preference.lightMode !== 'boolean') ||
@@ -270,10 +272,22 @@ function validatePreferences(preferences) {
 }
 
 export function normalizeBackupData(backup) {
-  if (!isRecord(backup) || ![1, 2, 3].includes(backup.version)) {
+  if (!isRecord(backup) || ![1, 2, 3, 4].includes(backup.version)) {
     throw new Error('Unsupported backup format or version.');
   }
-  const isCurrentVersion = backup.version === 3;
+  const isCurrentVersion = backup.version === 3 || backup.version === 4;
+  const hasSyncIdentity = backup.version === 4;
+  const syncIds = new Set();
+  const validateSyncId = (record, collection) => {
+    if (!hasSyncIdentity) return;
+    if (!isSyncId(record.syncId)) {
+      throw new Error(`Backup ${collection} contain an invalid sync ID.`);
+    }
+    if (syncIds.has(record.syncId)) {
+      throw new Error(`Backup contains duplicate sync IDs.`);
+    }
+    syncIds.add(record.syncId);
+  };
   if (backup.exportedAt !== undefined && (
     typeof backup.exportedAt !== 'string' || Number.isNaN(new Date(backup.exportedAt).getTime())
   )) {
@@ -320,6 +334,7 @@ export function normalizeBackupData(backup) {
       throw new Error('Backup categories contain an invalid record.');
     }
     categoryIds.add(category.id);
+    validateSyncId(category, 'categories');
     if (category.type === 'expense') categories.push({ ...category });
   }
   if (!categories.length) {
@@ -343,6 +358,7 @@ export function normalizeBackupData(backup) {
       throw new Error('Backup payment methods contain an invalid record.');
     }
     paymentMethodIds.add(method.id);
+    validateSyncId(method, 'payment methods');
     paymentMethods.push({ ...method });
   }
   if (isCurrentVersion && !paymentMethods.length) {
@@ -378,17 +394,25 @@ export function normalizeBackupData(backup) {
       )) ||
       (transaction.paymentMethodId !== undefined &&
         transaction.paymentMethodId !== null &&
-        (typeof transaction.paymentMethodId !== 'string' || !transaction.paymentMethodId.trim()))
+        (typeof transaction.paymentMethodId !== 'string' || !transaction.paymentMethodId.trim())) ||
+      (hasSyncIdentity && (
+        (transaction.categorySyncId !== undefined && transaction.categorySyncId !== null && !isSyncId(transaction.categorySyncId)) ||
+        (transaction.paymentMethodSyncId !== undefined && transaction.paymentMethodSyncId !== null && !isSyncId(transaction.paymentMethodSyncId))
+      ))
     ) {
       throw new Error('Backup transactions contain an invalid record.');
     }
+    validateSyncId(transaction, 'transactions');
     if (transaction.id !== undefined) {
       if (transactionIds.has(transaction.id)) throw new Error('Backup transaction IDs are duplicated.');
       transactionIds.add(transaction.id);
     }
     if (transaction.type === 'income') continue;
     if (!expenseCategoryIds.has(transaction.categoryId)) {
-      throw new Error(`Transaction references missing category "${transaction.categoryId}".`);
+      if (!hasSyncIdentity) {
+        throw new Error(`Transaction references missing category "${transaction.categoryId}".`);
+      }
+      warnings.push(`Transaction ${transaction.id ?? '(no ID)'} references missing category "${transaction.categoryId}".`);
     }
 
     let paymentMethodId = transaction.paymentMethodId;
@@ -396,12 +420,16 @@ export function normalizeBackupData(backup) {
       paymentMethodId = 'pm-other';
       missingMethodCount += 1;
     } else if (!paymentMethodIds.has(paymentMethodId)) {
-      paymentMethods.push({
-        id: paymentMethodId,
-        name: `Recovered method (${paymentMethodId})`
-      });
-      paymentMethodIds.add(paymentMethodId);
-      recoveredMethodCount += 1;
+      if (hasSyncIdentity) {
+        warnings.push(`Transaction ${transaction.id ?? '(no ID)'} references missing payment method "${paymentMethodId}".`);
+      } else {
+        paymentMethods.push({
+          id: paymentMethodId,
+          name: `Recovered method (${paymentMethodId})`
+        });
+        paymentMethodIds.add(paymentMethodId);
+        recoveredMethodCount += 1;
+      }
     }
 
     const rawAmount = transaction.amount;
@@ -442,11 +470,30 @@ export function normalizeBackupData(backup) {
       (budget.month !== 'all' && !isValidMonthString(budget.month)) ||
       typeof budget.amount !== 'number' ||
       !Number.isFinite(budget.amount) ||
-      budget.amount < 0
+      budget.amount < 0 ||
+      (hasSyncIdentity && budget.categorySyncId !== undefined && budget.categorySyncId !== null && !isSyncId(budget.categorySyncId))
     ) {
-      throw new Error('Backup budgets contain an invalid record.');
+      if (
+        hasSyncIdentity &&
+        isRecord(budget) &&
+        typeof budget.id === 'string' &&
+        budget.id.trim() &&
+        typeof budget.categoryId === 'string' &&
+        budget.categoryId !== 'overall' &&
+        !expenseCategoryIds.has(budget.categoryId) &&
+        (budget.month === 'all' || isValidMonthString(budget.month)) &&
+        typeof budget.amount === 'number' &&
+        Number.isSafeInteger(budget.amount) &&
+        budget.amount >= 0 &&
+        (budget.categorySyncId === undefined || budget.categorySyncId === null || isSyncId(budget.categorySyncId))
+      ) {
+        warnings.push(`Budget "${budget.id}" references missing category "${budget.categoryId}".`);
+      } else {
+        throw new Error('Backup budgets contain an invalid record.');
+      }
     }
     budgetIds.add(budget.id);
+    validateSyncId(budget, 'budgets');
     const amount = backup.version === 1 ? toPaisa(budget.amount) : budget.amount;
     if (!Number.isSafeInteger(amount)) throw new Error('Backup budget amount is outside the supported range.');
     budgets.push({ ...budget, amount });
@@ -469,8 +516,9 @@ export function normalizeBackupData(backup) {
       Number.isNaN(new Date(entry.createdAt).getTime()) ||
       (entry.categoryId !== undefined && (
         typeof entry.categoryId !== 'string' ||
-        (entry.categoryId !== 'overall' && !expenseCategoryIds.has(entry.categoryId))
+        (!hasSyncIdentity && entry.categoryId !== 'overall' && !expenseCategoryIds.has(entry.categoryId))
       )) ||
+      (hasSyncIdentity && entry.categorySyncId !== undefined && entry.categorySyncId !== null && !isSyncId(entry.categorySyncId)) ||
       (entry.budgetCategory !== undefined && typeof entry.budgetCategory !== 'string') ||
       (entry.description !== undefined && typeof entry.description !== 'string') ||
       !validHistoryAmount(entry.previousAmount) ||
@@ -480,17 +528,26 @@ export function normalizeBackupData(backup) {
       throw new Error('Backup budget history contains an invalid record.');
     }
     if (entry.id !== undefined) historyIds.add(entry.id);
+    validateSyncId(entry, 'budget history');
+    if (
+      hasSyncIdentity &&
+      entry.categoryId &&
+      entry.categoryId !== 'overall' &&
+      !expenseCategoryIds.has(entry.categoryId)
+    ) {
+      warnings.push(`Budget history entry ${entry.id ?? '(no ID)'} references missing category "${entry.categoryId}".`);
+    }
     budgetHistory.push({ ...entry });
   }
 
   let preferences = null;
   if (backup.preferences !== undefined) {
-    preferences = validatePreferences(backup.preferences);
+    preferences = validatePreferences(backup.preferences, validateSyncId);
   } else if (isCurrentVersion) {
     throw new Error('Backup preferences are missing.');
   }
 
-  return {
+  const normalized = {
     version: backup.version,
     transactions,
     categories,
@@ -501,6 +558,17 @@ export function normalizeBackupData(backup) {
     skippedIncomeCount: backup.transactions.filter((transaction) => transaction.type === 'income').length,
     warnings
   };
+  if (hasSyncIdentity) {
+    normalized.syncIdentityReport = getSyncIdentityReport({
+      transactions,
+      categories,
+      paymentMethods,
+      budgets,
+      budgetHistory,
+      preferences: preferences || []
+    });
+  }
+  return normalized;
 }
 
 export function parseBackupPayload(text) {
@@ -514,6 +582,14 @@ export function parseBackupPayload(text) {
 }
 
 export async function restoreBackupData(database, backup) {
+  const data = addSyncIdentities({
+    transactions: backup.transactions,
+    categories: backup.categories,
+    paymentMethods: backup.paymentMethods,
+    budgets: backup.budgets,
+    budgetHistory: backup.budgetHistory,
+    preferences: backup.preferences || []
+  });
   await database.transaction(
     'rw',
     database.transactions,
@@ -530,14 +606,15 @@ export async function restoreBackupData(database, backup) {
       await database.budgetHistory.clear();
       if (backup.preferences) await database.preferences.clear();
 
-      if (backup.transactions.length) await database.transactions.bulkPut(backup.transactions);
-      if (backup.categories.length) await database.categories.bulkPut(backup.categories);
-      if (backup.paymentMethods.length) await database.paymentMethods.bulkPut(backup.paymentMethods);
-      if (backup.budgets.length) await database.budgets.bulkPut(backup.budgets);
-      if (backup.budgetHistory.length) await database.budgetHistory.bulkPut(backup.budgetHistory);
-      if (backup.preferences?.length) await database.preferences.bulkPut(backup.preferences);
+      if (data.transactions.length) await database.transactions.bulkPut(data.transactions);
+      if (data.categories.length) await database.categories.bulkPut(data.categories);
+      if (data.paymentMethods.length) await database.paymentMethods.bulkPut(data.paymentMethods);
+      if (data.budgets.length) await database.budgets.bulkPut(data.budgets);
+      if (data.budgetHistory.length) await database.budgetHistory.bulkPut(data.budgetHistory);
+      if (backup.preferences && data.preferences.length) await database.preferences.bulkPut(data.preferences);
     }
   );
+  return data.syncIdentityReport;
 }
 
 export function buildBackupPayload(data) {
@@ -548,9 +625,31 @@ export function buildBackupPayload(data) {
   ) {
     throw new Error('A complete backup requires every data collection and app preferences.');
   }
+  const identityReport = getSyncIdentityReport(data);
+  if (identityReport.duplicateSyncIds.length || identityReport.identityWarnings.some(
+    (warning) => warning.code === 'missing-or-invalid-sync-id'
+  )) {
+    throw new Error('Backup data contains invalid sync identities.');
+  }
+  for (const collection of backupCollectionNames) {
+    for (const record of data[collection]) {
+      if (!isSyncId(record.syncId)) {
+        throw new Error(`Backup collection "${collection}" contains a record without a valid sync ID.`);
+      }
+    }
+  }
+  const seenSyncIds = new Set();
+  for (const collection of backupCollectionNames) {
+    for (const record of data[collection]) {
+      if (seenSyncIds.has(record.syncId)) {
+        throw new Error('Backup contains duplicate sync IDs.');
+      }
+      seenSyncIds.add(record.syncId);
+    }
+  }
   return JSON.stringify({
     ...data,
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString()
   }, null, 2);
 }

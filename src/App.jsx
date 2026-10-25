@@ -20,6 +20,8 @@ import {
   WalletCards
 } from 'lucide-react';
 import { financeRepository } from './services/financeRepository';
+import { useSupabaseAuth } from './services/useSupabaseAuth';
+import CloudAccountPanel from './components/CloudAccountPanel';
 import { defaultCategories, defaultPaymentMethods } from './data/defaultData';
 import {
   buildMonthlyBudgetTrend,
@@ -50,7 +52,49 @@ const initialForm = {
 const navItems = ['home', 'transactions', 'analytics', 'budget'];
 const budgetCategories = ['Salary', 'Freelance', 'Other'];
 
+function MigrationVerificationSummary({ report }) {
+  if (!report) return null;
+  const amountComparison = (comparison) => (
+    `${formatCurrency(fromPaisa(comparison.source))} source · ` +
+    `${formatCurrency(fromPaisa(comparison.destination))} SQLite · ` +
+    `${comparison.matches ? 'matched' : 'mismatch'}`
+  );
+
+  return (
+    <section className="panel migration-verification-card" aria-labelledby="migration-verification-title">
+      <h2 id="migration-verification-title">
+        {report.verified ? 'Migration verification passed' : 'Migration verification needs review'}
+      </h2>
+      <p>Imported backup version {report.version}. Amounts are compared in integer paisa.</p>
+      <ul>
+        {Object.entries(report.counts).map(([collection, comparison]) => (
+          <li key={collection}>
+            <strong>{collection}:</strong>{' '}
+            {comparison.comparable
+              ? `${comparison.source} source · ${comparison.destination} SQLite`
+              : `${comparison.destination} SQLite · not included in this legacy backup`}
+          </li>
+        ))}
+      </ul>
+      <p>Expense total: {amountComparison(report.financial.expenseTotalPaisa)}</p>
+      <p>Cumulative budget: {amountComparison(report.financial.cumulativeBudgetTotalPaisa)}</p>
+      <p>
+        Relationships: {report.references.matched
+          ? `${report.references.sourceCount} resolved and matched`
+          : 'relationship verification failed'} · Stable IDs matched: {report.identities.syncIdsMatched}/{report.identities.sourceRecords}
+      </p>
+      {report.skippedIncomeCount ? (
+        <p>{report.skippedIncomeCount} income transaction(s) were skipped according to the existing backup restore rules.</p>
+      ) : null}
+      {report.warnings.length ? (
+        <ul>{report.warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}</ul>
+      ) : null}
+    </section>
+  );
+}
+
 function App() {
+  const cloudAuth = useSupabaseAuth();
   const [tab, setTab] = useState('home');
   const [transactions, setTransactions] = useState([]);
   const [budgetHistory, setBudgetHistory] = useState([]);
@@ -89,6 +133,7 @@ function App() {
   const [paymentMethodToDelete, setPaymentMethodToDelete] = useState(null);
   const [showAddPaymentMethodForm, setShowAddPaymentMethodForm] = useState(false);
   const [restoreCandidate, setRestoreCandidate] = useState(null);
+  const [migrationReport, setMigrationReport] = useState(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [isPreparingRestore, setIsPreparingRestore] = useState(false);
   const fileInputRef = useRef(null);
@@ -604,6 +649,7 @@ function App() {
     if (!file) return;
 
     setRestoreCandidate(null);
+    setMigrationReport(null);
     setIsPreparingRestore(true);
     try {
       const text = await file.text();
@@ -612,6 +658,7 @@ function App() {
       setRestoreCandidate({
         fileName: file.name,
         fileDate: formatDate(new Date(file.lastModified), preferences?.dateFormat),
+        backupText: text,
         restoreData
       });
       setShowRestoreConfirm(true);
@@ -626,10 +673,14 @@ function App() {
 
   const handleConfirmRestore = async () => {
     if (!restoreCandidate) return;
-    const { restoreData } = restoreCandidate;
+    const { restoreData, backupText } = restoreCandidate;
 
     try {
-      await financeRepository.restoreBackup(restoreData);
+      const restoreResult = await financeRepository.restoreBackup(restoreData, {
+        replaceExisting: true,
+        sourceText: backupText
+      });
+      setMigrationReport(restoreResult?.migrationVerification || null);
       const refreshed = await loadData();
       if (!refreshed) {
         setStatus({
@@ -647,7 +698,11 @@ function App() {
         : 'Backup restored successfully.'
       });
     } catch (error) {
-      setStatus({ type: 'error', message: 'Could not restore the selected backup. Your current data was not changed.' });
+      setMigrationReport(error?.verificationReport || null);
+      setStatus({
+        type: 'error',
+        message: error?.message || 'Could not restore the selected backup. Your current data was not changed.'
+      });
     } finally {
       setShowRestoreConfirm(false);
     }
@@ -1528,6 +1583,21 @@ function App() {
   const renderMore = () => {
     return (
       <div className="more-page">
+        <section className="more-group" aria-labelledby="more-cloud-account-heading">
+          <h2 id="more-cloud-account-heading" className="more-group-title">Cloud account</h2>
+          <button type="button" className="more-row" onClick={() => setTab('cloud-account')}>
+            <span>Sign in or create account</span>
+            <span className="more-row-trailing">
+              <span className="more-row-value">
+                {cloudAuth.loading
+                  ? 'Checking…'
+                  : cloudAuth.user?.email || (cloudAuth.isConfigured ? 'Signed out' : 'Setup needed')}
+              </span>
+              <ChevronRight className="more-chevron" size={20} />
+            </span>
+          </button>
+        </section>
+
         <section className="more-group" aria-labelledby="more-account-heading">
           <h2 id="more-account-heading" className="more-group-title">Account</h2>
           <button
@@ -2080,6 +2150,7 @@ function App() {
                 <p>The selected backup has replaced the records on this device. No data was sent to a cloud account.</p>
               </div>
             </div>
+            <MigrationVerificationSummary report={migrationReport} />
             <p className="restore-complete-status" role="status">
               <span aria-hidden="true">✓</span>
               Data restored
@@ -2093,9 +2164,10 @@ function App() {
             <section className="restore-error-card" role="alert">
               <CircleAlert className="restore-error-icon" size={22} aria-hidden="true" />
               <h2>Unable to restore data</h2>
-              <p>Choose a valid PWS backup and try again.</p>
+              <p>{status.message || 'Choose a valid PWS backup and try again.'}</p>
               <strong>Your current data is unchanged.</strong>
             </section>
+            <MigrationVerificationSummary report={migrationReport} />
             <button
               type="button"
               className="primary-action full restore-retry-button"
@@ -2296,6 +2368,10 @@ function App() {
 
   if (tab === 'account') {
     return renderAccount();
+  }
+
+  if (tab === 'cloud-account') {
+    return <CloudAccountPanel auth={cloudAuth} onBack={() => setTab('more')} />;
   }
 
   if (tab === 'payment-methods') {

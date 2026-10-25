@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { db, seedDatabase } from '../db/db';
 import {
   buildBackupPayload,
@@ -5,14 +6,36 @@ import {
   createBudgetHistoryEntry,
   restoreBackupData as writeBackupData
 } from '../lib/finance';
+import {
+  createSyncId,
+  getCanonicalSyncId,
+  getSyncIdentityReport
+} from './syncIdentity';
+import { createNativeSqliteAdapter, seedNativeSqliteDatabase } from './nativeSqliteAdapter';
+import { importBackupToNativeSqlite } from './nativeBackupMigration';
 
-export function createFinanceRepository(database = db, seed = seedDatabase) {
+export function createFinanceRepository(database, seed) {
+  const useNativeSqlite = database?.adapterType === 'native-sqlite' || (!database && Capacitor.isNativePlatform());
+  database ||= useNativeSqlite ? createNativeSqliteAdapter() : db;
+  seed ||= useNativeSqlite ? () => seedNativeSqliteDatabase(database) : seedDatabase;
   const setActiveBudget = async (month, categoryId, amount) => {
     const id = `budget-${month}-${categoryId}`;
     if (amount === null) {
       await database.budgets.delete(id);
     } else {
-      await database.budgets.put({ id, categoryId, month, amount });
+      const existing = await database.budgets.get(id);
+      const category = categoryId === 'overall' ? null : await database.categories.get(categoryId);
+      await database.budgets.put({
+        ...existing,
+        id,
+        categoryId,
+        month,
+        amount,
+        syncId: existing?.syncId || createSyncId(),
+        ...(categoryId === 'overall'
+          ? { syncRole: 'derived' }
+          : { categorySyncId: category?.syncId || existing?.categorySyncId || null })
+      });
     }
   };
 
@@ -25,11 +48,15 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
       allBudgets.filter((budget) => budget.id !== 'budget-all-overall'),
       allHistory
     );
+    const existing = await database.budgets.get('budget-all-overall');
     await database.budgets.put({
+      ...existing,
       id: 'budget-all-overall',
       categoryId: 'overall',
       month: 'all',
-      amount: total
+      amount: total,
+      syncId: existing?.syncId || createSyncId(),
+      syncRole: 'derived'
     });
   };
 
@@ -53,7 +80,9 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
             id: 'budget-all-overall',
             categoryId: 'overall',
             month: 'all',
-            amount: total
+            amount: total,
+            syncId: createSyncId(),
+            syncRole: 'derived'
           };
           await database.budgets.put(cumulativeBudget);
           loadedBudgets = [...loadedBudgets, cumulativeBudget];
@@ -66,21 +95,52 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
         paymentMethods,
         budgets: loadedBudgets,
         budgetHistory,
-        preferences
+        preferences,
+        syncIdentityReport: getSyncIdentityReport({
+          transactions,
+          categories,
+          paymentMethods,
+          budgets: loadedBudgets,
+          budgetHistory,
+          preferences: preferences ? [preferences] : []
+        })
       };
     },
 
-    savePreferences(preferences) {
-      return database.preferences.put(preferences);
+    async savePreferences(preferences) {
+      const existing = await database.preferences.get(preferences.id);
+      return database.preferences.put({
+        ...preferences,
+        syncId: preferences.syncId || existing?.syncId || createSyncId()
+      });
     },
 
     async saveTransaction(id, transaction) {
-      if (id) return database.transactions.update(id, transaction);
-      return database.transactions.add(transaction);
+      return database.transaction(
+        'rw',
+        database.transactions,
+        database.categories,
+        database.paymentMethods,
+        async () => {
+          const [existing, category, paymentMethod] = await Promise.all([
+            id ? database.transactions.get(id) : null,
+            database.categories.get(transaction.categoryId),
+            database.paymentMethods.get(transaction.paymentMethodId)
+          ]);
+          const nextTransaction = {
+            ...transaction,
+            syncId: transaction.syncId || existing?.syncId || createSyncId(),
+            categorySyncId: category?.syncId || transaction.categorySyncId || null,
+            paymentMethodSyncId: paymentMethod?.syncId || transaction.paymentMethodSyncId || null
+          };
+          if (id) return database.transactions.update(id, nextTransaction);
+          return database.transactions.add(nextTransaction);
+        }
+      );
     },
 
     async saveBudgetHistory({ id, month, budgetCategory, date, amount, description, timestamp = new Date() }) {
-      await database.transaction('rw', database.budgets, database.budgetHistory, async () => {
+      await database.transaction('rw', database.budgets, database.budgetHistory, database.categories, async () => {
         const existingHistory = id ? await database.budgetHistory.get(id) : null;
         if (id && !existingHistory) {
           throw new Error('Budget history entry no longer exists.');
@@ -96,7 +156,14 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
             date,
             amount,
             description: description.trim(),
-            createdAt: timestamp.toISOString()
+            createdAt: timestamp.toISOString(),
+            syncId: existingHistory.syncId || createSyncId(),
+            ...(categoryId === 'overall'
+              ? {}
+              : {
+                  categorySyncId: (await database.categories.get(categoryId))?.syncId ||
+                    existingHistory.categorySyncId || null
+                })
           };
           if (oldMonth !== month) {
             const oldMonthHistory = await database.budgetHistory
@@ -142,6 +209,7 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
             }
           : {
               ...createBudgetHistoryEntry(month, 'overall', currentTotal, amount, description, date, timestamp),
+              syncId: createSyncId(),
               budgetCategory,
               entryType: 'addition'
             };
@@ -150,7 +218,9 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
           id: 'budget-all-overall',
           categoryId: 'overall',
           month: 'all',
-          amount: currentTotal + addition
+          amount: currentTotal + addition,
+          syncId: cumulativeBudget?.syncId || createSyncId(),
+          syncRole: 'derived'
         });
       });
     },
@@ -162,7 +232,7 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
       }
 
       const categoryId = record.categoryId || 'overall';
-      await database.transaction('rw', database.budgets, database.budgetHistory, async () => {
+      await database.transaction('rw', database.budgets, database.budgetHistory, database.categories, async () => {
         if (record.entryType !== 'addition') {
           const remainingHistory = await database.budgetHistory
             .where('month').equals(record.month)
@@ -185,7 +255,8 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
     },
 
     createCategory(category) {
-      return database.categories.put(category);
+      const syncId = getCanonicalSyncId('categories', category.id) || category.syncId || createSyncId();
+      return database.categories.add({ ...category, syncId });
     },
 
     async updateCategory(id, name) {
@@ -213,7 +284,8 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
     },
 
     createPaymentMethod(paymentMethod) {
-      return database.paymentMethods.put(paymentMethod);
+      const syncId = getCanonicalSyncId('paymentMethods', paymentMethod.id) || paymentMethod.syncId || createSyncId();
+      return database.paymentMethods.add({ ...paymentMethod, syncId });
     },
 
     async updatePaymentMethod(id, name) {
@@ -254,8 +326,30 @@ export function createFinanceRepository(database = db, seed = seedDatabase) {
       return buildBackupPayload(data);
     },
 
-    restoreBackup(backup) {
+    restoreBackup(backup, options) {
+      if (database.adapterType === 'native-sqlite') {
+        return importBackupToNativeSqlite(database, options?.sourceText ?? backup, options);
+      }
       return writeBackupData(database, backup);
+    },
+
+    async getSyncIdentityReport() {
+      const [transactions, categories, paymentMethods, budgets, budgetHistory, preferences] = await Promise.all([
+        database.transactions.toArray(),
+        database.categories.toArray(),
+        database.paymentMethods.toArray(),
+        database.budgets.toArray(),
+        database.budgetHistory.toArray(),
+        database.preferences.toArray()
+      ]);
+      return getSyncIdentityReport({
+        transactions,
+        categories,
+        paymentMethods,
+        budgets,
+        budgetHistory,
+        preferences
+      });
     }
   };
 }

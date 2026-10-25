@@ -10,6 +10,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "8.1.1",
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@supabase/supabase-js": "2.118.0",
     "dexie": "^4.4.6",
     "lucide-react": "^1.60.0",
     "react": "^19.3.1",
@@ -17,6 +21,7 @@
     "vite-plugin-pwa": "^2.0.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",

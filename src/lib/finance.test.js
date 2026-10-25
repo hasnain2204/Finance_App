@@ -23,22 +23,43 @@ import {
 const completeBackupData = () => ({
   transactions: [{
     id: 15,
+    syncId: '30000000-0000-4000-8000-000000000001',
     title: 'Groceries',
     amount: 12550,
     type: 'expense',
     categoryId: 'cat-food',
+    categorySyncId: '10000000-0000-4000-8000-000000000001',
     paymentMethodId: 'pm-cash',
+    paymentMethodSyncId: '20000000-0000-4000-8000-000000000001',
     date: '2026-10-24',
     notes: 'Weekly shop',
     createdAt: '2026-10-24T12:00:00.000Z'
   }],
-  categories: [{ id: 'cat-food', name: 'Food', type: 'expense' }],
-  paymentMethods: [{ id: 'pm-cash', name: 'Cash' }],
-  budgets: [{ id: 'budget-2026-10-food', categoryId: 'cat-food', month: '2026-10', amount: 25000 }],
+  categories: [{
+    id: 'cat-food',
+    syncId: '10000000-0000-4000-8000-000000000001',
+    name: 'Food',
+    type: 'expense'
+  }],
+  paymentMethods: [{
+    id: 'pm-cash',
+    syncId: '20000000-0000-4000-8000-000000000001',
+    name: 'Cash'
+  }],
+  budgets: [{
+    id: 'budget-2026-10-food',
+    syncId: '40000000-0000-4000-8000-000000000001',
+    categoryId: 'cat-food',
+    categorySyncId: '10000000-0000-4000-8000-000000000001',
+    month: '2026-10',
+    amount: 25000
+  }],
   budgetHistory: [{
     id: 7,
+    syncId: '50000000-0000-4000-8000-000000000001',
     month: '2026-10',
     categoryId: 'cat-food',
+    categorySyncId: '10000000-0000-4000-8000-000000000001',
     date: '2026-10-24',
     createdAt: '2026-10-24T12:00:00.000Z',
     previousAmount: null,
@@ -47,6 +68,7 @@ const completeBackupData = () => ({
   }],
   preferences: [{
     id: 'app',
+    syncId: '60000000-0000-4000-8000-000000000001',
     currency: 'PKR',
     lightMode: false,
     name: 'A User',
@@ -55,6 +77,24 @@ const completeBackupData = () => ({
     notificationsEnabled: true
   }]
 });
+
+const completeLegacyBackupData = () => {
+  const data = completeBackupData();
+  const withoutFields = (record, fields) => Object.fromEntries(
+    Object.entries(record).filter(([key]) => !fields.includes(key))
+  );
+  return {
+    ...data,
+    transactions: data.transactions.map((record) => withoutFields(record, [
+      'syncId', 'categorySyncId', 'paymentMethodSyncId'
+    ])),
+    categories: data.categories.map((record) => withoutFields(record, ['syncId'])),
+    paymentMethods: data.paymentMethods.map((record) => withoutFields(record, ['syncId'])),
+    budgets: data.budgets.map((record) => withoutFields(record, ['syncId', 'categorySyncId'])),
+    budgetHistory: data.budgetHistory.map((record) => withoutFields(record, ['syncId', 'categorySyncId'])),
+    preferences: data.preferences.map((record) => withoutFields(record, ['syncId']))
+  };
+};
 
 describe('finance utilities', () => {
   it('converts rupees to paisa correctly', () => {
@@ -144,12 +184,12 @@ describe('finance utilities', () => {
     expect(createBudgetHistoryEntry('2026-10', 'cat-food', 125000, null, '', '2026-10-24', timestamp).amount).toBeNull();
   });
 
-  it('round trips every database collection and preserves preferences in v3 backups', () => {
+  it('round trips v4 backups with stable sync IDs and relationship references', () => {
     const data = completeBackupData();
     const backup = JSON.parse(buildBackupPayload(data));
     const restored = normalizeBackupData(backup);
 
-    expect(backup.version).toBe(3);
+    expect(backup.version).toBe(4);
     expect(backup.exportedAt).toBeTruthy();
     expect(restored.transactions).toEqual(data.transactions);
     expect(restored.categories).toEqual(data.categories);
@@ -157,10 +197,58 @@ describe('finance utilities', () => {
     expect(restored.budgets).toEqual(data.budgets);
     expect(restored.budgetHistory).toEqual(data.budgetHistory);
     expect(restored.preferences).toEqual(data.preferences);
+    expect(restored.transactions[0]).toMatchObject({
+      syncId: data.transactions[0].syncId,
+      categorySyncId: data.transactions[0].categorySyncId,
+      paymentMethodSyncId: data.transactions[0].paymentMethodSyncId
+    });
+    expect(restored.budgets[0].categorySyncId).toBe(data.budgets[0].categorySyncId);
+    expect(restored.budgetHistory[0].categorySyncId).toBe(data.budgetHistory[0].categorySyncId);
+    expect(restored.syncIdentityReport).toMatchObject({
+      duplicateSyncIds: [],
+      identityWarnings: [],
+      unresolvedRelationships: []
+    });
+  });
+
+  it('continues to import complete legacy v3 backups without sync identity fields', () => {
+    const restored = normalizeBackupData({
+      version: 3,
+      ...completeLegacyBackupData()
+    });
+
+    expect(restored.transactions[0]).toMatchObject({
+      id: 15,
+      title: 'Groceries',
+      amount: 12550,
+      categoryId: 'cat-food',
+      paymentMethodId: 'pm-cash'
+    });
+    expect(restored.categories).toEqual([{ id: 'cat-food', name: 'Food', type: 'expense' }]);
+    expect(restored.paymentMethods).toEqual([{ id: 'pm-cash', name: 'Cash' }]);
+    expect(restored.budgets[0]).toMatchObject({ amount: 25000, categoryId: 'cat-food' });
+    expect(restored.preferences[0]).toMatchObject({ id: 'app', currency: 'PKR' });
+  });
+
+  it('rejects malformed, missing, or duplicate v4 sync identity fields', () => {
+    const missingSyncId = completeBackupData();
+    delete missingSyncId.categories[0].syncId;
+    expect(() => normalizeBackupData({ version: 4, ...missingSyncId }))
+      .toThrow('Backup categories contain an invalid sync ID.');
+
+    const malformedRelationship = completeBackupData();
+    malformedRelationship.transactions[0].categorySyncId = 'not-a-uuid';
+    expect(() => normalizeBackupData({ version: 4, ...malformedRelationship }))
+      .toThrow('Backup transactions contain an invalid record.');
+
+    const duplicateSyncId = completeBackupData();
+    duplicateSyncId.transactions[0].syncId = duplicateSyncId.categories[0].syncId;
+    expect(() => normalizeBackupData({ version: 4, ...duplicateSyncId }))
+      .toThrow('Backup contains duplicate sync IDs.');
   });
 
   it('recovers missing and unknown payment methods without breaking transaction references', () => {
-    const backup = completeBackupData();
+    const backup = completeLegacyBackupData();
     backup.paymentMethods = [{ id: 'pm-cash', name: 'Cash' }];
     backup.transactions = [
       { ...backup.transactions[0], paymentMethodId: 'pm-legacy' },
@@ -282,6 +370,40 @@ describe('finance utilities', () => {
     for (const [name, rows] of Object.entries(before)) {
       expect(database[name].getRows()).toEqual(rows);
     }
+  });
+
+  it('restores v4 records without replacing stable IDs or their references', async () => {
+    const makeTable = () => {
+      let rows = [];
+      return {
+        clear: async () => { rows = []; },
+        bulkPut: async (records) => { rows = [...rows, ...records]; },
+        getRows: () => rows
+      };
+    };
+    const database = {
+      transactions: makeTable(),
+      categories: makeTable(),
+      paymentMethods: makeTable(),
+      budgets: makeTable(),
+      budgetHistory: makeTable(),
+      preferences: makeTable()
+    };
+    database.transaction = async (...args) => args.at(-1)();
+    const backup = normalizeBackupData({ version: 4, ...completeBackupData() });
+
+    await restoreBackupData(database, backup);
+
+    expect(database.transactions.getRows()[0]).toMatchObject({
+      syncId: completeBackupData().transactions[0].syncId,
+      categorySyncId: completeBackupData().transactions[0].categorySyncId,
+      paymentMethodSyncId: completeBackupData().transactions[0].paymentMethodSyncId
+    });
+    expect(database.categories.getRows()[0].syncId).toBe(completeBackupData().categories[0].syncId);
+    expect(database.paymentMethods.getRows()[0].syncId).toBe(completeBackupData().paymentMethods[0].syncId);
+    expect(database.budgets.getRows()[0].categorySyncId).toBe(completeBackupData().budgets[0].categorySyncId);
+    expect(database.budgetHistory.getRows()[0].categorySyncId)
+      .toBe(completeBackupData().budgetHistory[0].categorySyncId);
   });
 
   it('formats dates using the local calendar date', () => {
