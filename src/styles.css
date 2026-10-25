@@ -1735,8 +1735,7 @@ input:focus, select:focus, textarea:focus {
   padding: 28px 16px 24px;
   background: var(--bg);
   opacity: 0;
-  animation: loading-screen-in 180ms ease-out forwards,
-    loading-screen-out 220ms ease-in 900ms forwards;
+  animation: loading-screen-in 180ms ease-out forwards;
 }
 
 .loading-title {

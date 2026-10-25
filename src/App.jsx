@@ -76,7 +76,7 @@ function App() {
   const [preferenceNotificationsDraft, setPreferenceNotificationsDraft] = useState(false);
   const [preferenceSaveStatus, setPreferenceSaveStatus] = useState({ type: 'idle', message: '' });
   const [onboardingName, setOnboardingName] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [editingTransactionId, setEditingTransactionId] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -213,6 +213,8 @@ function App() {
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
       return false;
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -234,11 +236,17 @@ function App() {
     };
 
     setIsLoading(true);
-    await Promise.all([
-      db.preferences.put(nextPreferences),
-      new Promise((resolve) => window.setTimeout(resolve, 1150))
-    ]);
-    setPreferences(nextPreferences);
+    try {
+      await Promise.all([
+        db.preferences.put(nextPreferences),
+        new Promise((resolve) => window.setTimeout(resolve, 1150))
+      ]);
+      setPreferences(nextPreferences);
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Could not save setup. Please try again.' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const openPreferences = () => {
@@ -267,6 +275,7 @@ function App() {
   const handleInputChange = (event) => {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setStatus({ type: 'idle', message: '' });
   };
 
   const handleBudgetFormChange = (event) => {
@@ -1122,6 +1131,12 @@ function App() {
             {editingTransactionId ? 'Save Changes' : 'Save Expense'}
           </button>
         </form>
+
+        {status.message ? (
+          <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
+            {status.message}
+          </p>
+        ) : null}
 
         <p className="transaction-device-note">Saved on this device.</p>
       </section>
@@ -2446,6 +2461,11 @@ function App() {
             <button type="button" className="primary-action full onboarding-button" onClick={handleContinueOnboarding}>
               Continue
             </button>
+            {status.message ? (
+              <p className={`status ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>
+                {status.message}
+              </p>
+            ) : null}
             <p className="currency-label">(PKR) · Light mode</p>
           </section>
         </section>
