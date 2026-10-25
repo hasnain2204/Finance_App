@@ -23,6 +23,9 @@ import { db, seedDatabase } from './db/db';
 import { defaultCategories, defaultPaymentMethods } from './data/defaultData';
 import {
   buildBackupPayload,
+  buildMonthlyBudgetTrend,
+  buildMonthlyExpenseTrend,
+  buildWeeklyBudgetTrend,
   calculateCumulativeBudgetTotal,
   calculateCategoryExpenseTotals,
   calculateExpenseTotal,
@@ -32,6 +35,8 @@ import {
   formatCurrency,
   fromPaisa,
   getLocalDateString,
+  parseBackupPayload,
+  restoreBackupData,
   toPaisa,
   validateTransaction
 } from './lib/finance';
@@ -124,21 +129,11 @@ function App() {
   )), [filteredTransactions, budgetHistory]);
 
   const weeklySpending = useMemo(() => {
-    const days = Array.from({ length: 7 }, (_, index) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (6 - index));
-      return date;
-    });
-
-    return days.map((day) => {
-      const iso = getLocalDateString(day);
-      const total = transactions
-        .filter((tx) => tx.type === 'expense' && tx.date.startsWith(iso))
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      return { label: day.toLocaleDateString('en-PK', { weekday: 'short' }), value: total };
-    });
-  }, [transactions]);
+    return buildWeeklyBudgetTrend(
+      transactions,
+      budgets.some((budget) => budget.categoryId === 'overall') ? fromPaisa(totalBudgetPaisa) : null
+    );
+  }, [transactions, budgets, totalBudgetPaisa]);
 
   const categoryTotals = useMemo(() => {
     const totalsByCategory = calculateCategoryExpenseTotals(transactions, getLocalDateString().slice(0, 7));
@@ -146,6 +141,30 @@ function App() {
       .map(([categoryId, total]) => [categoryMap[categoryId]?.name || 'Unknown', total])
       .sort((a, b) => b[1] - a[1]);
   }, [transactions, categoryMap]);
+
+  const paymentMethodTotals = useMemo(() => {
+    const totals = transactions.reduce((result, transaction) => {
+      if (!transaction.date?.startsWith(getLocalDateString().slice(0, 7))) return result;
+      const methodId = transaction.paymentMethodId || 'unknown';
+      result[methodId] = (result[methodId] || 0) + Number(transaction.amount || 0);
+      return result;
+    }, {});
+    return Object.entries(totals)
+      .map(([methodId, amount]) => ({
+        label: paymentMap[methodId]?.name || 'Unknown',
+        amount
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [transactions, paymentMap]);
+
+  const monthlyExpenseTrend = useMemo(
+    () => buildMonthlyExpenseTrend(transactions, 6),
+    [transactions]
+  );
+  const monthlyBudgetTrend = useMemo(
+    () => buildMonthlyBudgetTrend(transactions, budgets, budgetHistory, 6),
+    [transactions, budgets, budgetHistory]
+  );
 
   const loadData = async () => {
     try {
@@ -190,8 +209,10 @@ function App() {
           : 'DD MMM YYYY',
         notificationsEnabled: Boolean(appPreferences?.notificationsEnabled)
       });
+      return true;
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
+      return false;
     }
   };
 
@@ -712,9 +733,37 @@ function App() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
-      const payload = buildBackupPayload({ transactions, categories, paymentMethods, budgets, budgetHistory });
+      const backupData = await db.transaction(
+        'r',
+        db.transactions,
+        db.categories,
+        db.paymentMethods,
+        db.budgets,
+        db.budgetHistory,
+        db.preferences,
+        async () => {
+          const [allTransactions, allCategories, allPaymentMethods, allBudgets, allBudgetHistory, allPreferences] =
+            await Promise.all([
+              db.transactions.toArray(),
+              db.categories.toArray(),
+              db.paymentMethods.toArray(),
+              db.budgets.toArray(),
+              db.budgetHistory.toArray(),
+              db.preferences.toArray()
+            ]);
+          return {
+            transactions: allTransactions,
+            categories: allCategories,
+            paymentMethods: allPaymentMethods,
+            budgets: allBudgets,
+            budgetHistory: allBudgetHistory,
+            preferences: allPreferences
+          };
+        }
+      );
+      const payload = buildBackupPayload(backupData);
       const blob = new Blob([payload], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -736,60 +785,12 @@ function App() {
     setIsPreparingRestore(true);
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text);
-      if (!parsed || ![1, 2].includes(parsed.version) || !Array.isArray(parsed.transactions)) {
-        throw new Error('Invalid backup format');
-      }
-
-      const restoredCategories = Array.isArray(parsed.categories)
-        ? parsed.categories.filter((category) => category.type === 'expense')
-        : defaultCategories;
-      const restoredCategoryIds = new Set(restoredCategories.map((category) => category.id));
-      const restoredTransactions = parsed.transactions
-        .filter((tx) => tx.type === 'expense')
-        .map((tx) => ({
-          ...tx,
-          amount: toPaisa(Number(tx.amount || 0))
-        }));
-      const restoredBudgets = Array.isArray(parsed.budgets)
-        ? parsed.budgets
-            .filter((budget) =>
-              budget.categoryId === 'overall' || restoredCategoryIds.has(budget.categoryId)
-            )
-            .map((budget) => ({
-              ...budget,
-              amount: parsed.version === 1 ? toPaisa(Number(budget.amount || 0)) : Number(budget.amount)
-            }))
-        : [];
-      const restoredBudgetHistory = Array.isArray(parsed.budgetHistory)
-        ? parsed.budgetHistory.map((entry) => {
-            const validAmount = (amount) => amount === null || (Number.isSafeInteger(amount) && amount >= 0);
-            if (
-              !entry ||
-              !/^\d{4}-\d{2}$/.test(entry.month) ||
-              !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
-              typeof entry.createdAt !== 'string' ||
-              Number.isNaN(new Date(entry.createdAt).getTime()) ||
-              (entry.categoryId !== undefined && (typeof entry.categoryId !== 'string' || !entry.categoryId)) ||
-              (entry.budgetCategory !== undefined && (typeof entry.budgetCategory !== 'string' || !entry.budgetCategory)) ||
-              (entry.description !== undefined && typeof entry.description !== 'string') ||
-              !validAmount(entry.previousAmount) ||
-              !validAmount(entry.amount)
-            ) {
-              throw new Error('Invalid budget history in backup');
-            }
-            return { ...entry };
-          })
-        : [];
+      const restoreData = parseBackupPayload(text);
 
       setRestoreCandidate({
         fileName: file.name,
         fileDate: formatDate(new Date(file.lastModified), preferences?.dateFormat),
-        parsed,
-        restoredCategories,
-        restoredTransactions,
-        restoredBudgets,
-        restoredBudgetHistory
+        restoreData
       });
       setShowRestoreConfirm(true);
       setStatus({ type: 'idle', message: '' });
@@ -803,35 +804,25 @@ function App() {
 
   const handleConfirmRestore = async () => {
     if (!restoreCandidate) return;
-    const {
-      parsed,
-      restoredCategories,
-      restoredTransactions,
-      restoredBudgets,
-      restoredBudgetHistory
-    } = restoreCandidate;
+    const { restoreData } = restoreCandidate;
 
     try {
-      await db.transaction('rw', db.transactions, db.categories, db.paymentMethods, db.budgets, db.budgetHistory, async () => {
-        await db.transactions.clear();
-        await db.categories.clear();
-        await db.paymentMethods.clear();
-        await db.budgets.clear();
-        await db.budgetHistory.clear();
-
-        if (restoredCategories.length) await db.categories.bulkPut(restoredCategories);
-        if (Array.isArray(parsed.paymentMethods)) await db.paymentMethods.bulkPut(parsed.paymentMethods);
-        if (restoredTransactions.length) await db.transactions.bulkPut(restoredTransactions);
-        if (restoredBudgets.length) await db.budgets.bulkPut(restoredBudgets);
-        if (restoredBudgetHistory.length) await db.budgetHistory.bulkPut(restoredBudgetHistory);
-      });
-
-      await loadData();
-      setStatus({
-        type: 'success',
-        message: parsed.transactions.some((tx) => tx.type === 'income')
-          ? 'Backup restored. Income transactions were not imported.'
-          : 'Backup restored successfully.'
+      await restoreBackupData(db, restoreData);
+      const refreshed = await loadData();
+      if (!refreshed) {
+        setStatus({
+          type: 'error',
+          message: 'Backup was restored, but the app could not reload the data. Restart the app to refresh it.'
+        });
+        return;
+      }
+      const notices = [...restoreData.warnings];
+      if (restoreData.skippedIncomeCount) {
+        notices.push(`${restoreData.skippedIncomeCount} income transaction(s) were not imported.`);
+      }
+      setStatus({ type: 'success', message: notices.length
+        ? `Backup restored. ${notices.join(' ')}`
+        : 'Backup restored successfully.'
       });
     } catch (error) {
       setStatus({ type: 'error', message: 'Could not restore the selected backup. Your current data was not changed.' });
@@ -947,22 +938,95 @@ function App() {
 
         <section className="panel home-chart-card">
           <div className="panel-header">
-            <h2>Weekly spending</h2>
+            <h2>Weekly expenses &amp; remaining budget</h2>
           </div>
 
-          <div className="chart-bars" aria-label="Weekly spending chart">
-            {weeklySpending.map((day) => {
-              const max = Math.max(...weeklySpending.map((item) => item.value), 1);
-              return (
-                <div key={day.label} className="bar-column">
-                  <span className="bar-value">{Math.round(day.value).toLocaleString('en-PK')}</span>
-                  <span className="bar" style={{ height: `${Math.max(18, (day.value / max) * 100)}%` }} />
-                  <small>{day.label.slice(0, 3)}</small>
+          {(() => {
+            const chartWidth = 360;
+            const plotTop = 14;
+            const plotBottom = 142;
+            const plotHeight = plotBottom - plotTop;
+            const plotLeft = 12;
+            const plotWidth = chartWidth - plotLeft * 2;
+            const hasBudget = weeklySpending.some((day) => day.remainingBudget !== null);
+            const values = weeklySpending.flatMap((day) => (
+              hasBudget ? [day.totalExpenses, day.remainingBudget] : [day.totalExpenses]
+            ));
+            const minValue = Math.min(0, ...values);
+            const maxValue = Math.max(1, ...values);
+            const valueRange = maxValue - minValue || 1;
+            const xForIndex = (index) => plotLeft + (plotWidth * index) / (weeklySpending.length - 1);
+            const yForValue = (value) => plotBottom - ((value - minValue) / valueRange) * plotHeight;
+            const expensesPoints = weeklySpending.map((day, index) => (
+              `${xForIndex(index)},${yForValue(day.totalExpenses)}`
+            )).join(' ');
+            const budgetPoints = hasBudget
+              ? weeklySpending.map((day, index) => (
+                  `${xForIndex(index)},${yForValue(day.remainingBudget)}`
+                )).join(' ')
+              : '';
+
+            return (
+              <>
+                <svg
+                  className="weekly-trend-chart"
+                  viewBox={`0 0 ${chartWidth} 190`}
+                  role="img"
+                  aria-label="Seven-day chart of daily expenses and remaining budget"
+                >
+                  {[0, 1, 2, 3].map((line) => {
+                    const y = plotTop + (plotHeight * line) / 3;
+                    return <line key={line} className="chart-gridline" x1={plotLeft} x2={chartWidth - plotLeft} y1={y} y2={y} />;
+                  })}
+                  {weeklySpending.map((day, index) => {
+                    const x = xForIndex(index);
+                    const expenseY = yForValue(day.expenses);
+                    const zeroY = yForValue(0);
+                    return (
+                      <rect
+                        key={`bar-${day.isoDate}`}
+                        className="weekly-expense-bar"
+                        x={x - 10}
+                        y={Math.min(expenseY, zeroY)}
+                        width="20"
+                        height={Math.max(2, Math.abs(zeroY - expenseY))}
+                        rx="4"
+                      >
+                        <title>{`${formatDate(day.isoDate, preferences?.dateFormat)}: ${formatCurrency(day.expenses)} spent`}</title>
+                      </rect>
+                    );
+                  })}
+                  <polyline className="weekly-expense-line" points={expensesPoints} />
+                  {hasBudget ? <polyline className="weekly-budget-line" points={budgetPoints} /> : null}
+                  {weeklySpending.map((day, index) => {
+                    const x = xForIndex(index);
+                    const expenseY = yForValue(day.totalExpenses);
+                    const budgetY = hasBudget ? yForValue(day.remainingBudget) : null;
+                    return (
+                      <g key={day.isoDate}>
+                        <circle className="weekly-expense-point" cx={x} cy={expenseY} r="3.5">
+                          <title>{`${formatDate(day.isoDate, preferences?.dateFormat)}: Overall expenses ${formatCurrency(day.totalExpenses)}`}</title>
+                        </circle>
+                        {hasBudget ? (
+                          <circle className="weekly-budget-point" cx={x} cy={budgetY} r="3.5">
+                            <title>{`${formatDate(day.isoDate, preferences?.dateFormat)}: Remaining budget ${formatCurrency(day.remainingBudget)}`}</title>
+                          </circle>
+                        ) : null}
+                        <text className="weekly-chart-date" x={x} y="174" textAnchor="middle">
+                          {formatDate(day.isoDate, preferences?.dateFormat)}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+                <div className="weekly-chart-legend" aria-label="Chart legend">
+                  <span><i className="weekly-legend-dot expense-dot" />Overall expenses</span>
+                  <span><i className="weekly-legend-dot budget-dot" />{hasBudget ? 'Remaining budget' : 'Budget not set'}</span>
                 </div>
-              );
-            })}
-          </div>
-          <p className="chart-footer">Expenses in PKR (Rs)</p>
+              </>
+            );
+          })()}
+          <p className="chart-footer">Bars show each day’s expenses; lines show cumulative expenses and remaining budget (PKR)</p>
         </section>
 
         <section className="panel home-recent-card">
@@ -1251,42 +1315,154 @@ function App() {
     const totalSpent = calculateExpenseTotal(transactions);
     const remainingBalance = overallBudget - totalSpent;
     const spendingPercent = overallBudget > 0 ? (totalSpent / overallBudget) * 100 : 0;
+    const currentDate = new Date();
+    const currentMonth = getLocalDateString(currentDate).slice(0, 7);
+    const previousMonthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+    const previousMonth = getLocalDateString(previousMonthDate).slice(0, 7);
+    const previousMonthExpense = calculateExpenseTotal(transactions, previousMonth);
+    const monthChange = previousMonthExpense > 0
+      ? ((monthlyExpense - previousMonthExpense) / previousMonthExpense) * 100
+      : null;
+    const currentMonthTransactions = transactions.filter((transaction) => transaction.date?.startsWith(currentMonth));
+    const averageDailyExpense = monthlyExpense / Math.max(1, currentDate.getDate());
+    const largestExpense = currentMonthTransactions.reduce(
+      (largest, transaction) => Math.max(largest, Number(transaction.amount || 0)),
+      0
+    );
+    const monthLabel = (date) => date.toLocaleDateString('en-PK', { month: 'short' });
+    const highestTrendAmount = Math.max(1, ...monthlyExpenseTrend.map((month) => month.amount));
+    const categoryColors = ['#2f66f6', '#d02222', '#30a316', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b'];
+    const categoryTotal = categoryTotals.reduce((total, [, amount]) => total + amount, 0);
+    let categoryGradientStart = 0;
+    const categoryGradient = categoryTotals.length
+      ? categoryTotals.map(([, amount], index) => {
+          const start = categoryGradientStart;
+          categoryGradientStart += categoryTotal ? (amount / categoryTotal) * 100 : 0;
+          return `${categoryColors[index % categoryColors.length]} ${start}% ${categoryGradientStart}%`;
+        }).join(', ')
+      : '#e8edf5 0% 100%';
 
     return (
       <div className="stacked-blocks">
-        <section className="panel">
+        <section className="panel analytics-overview">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Monthly</p>
-              <h2>Analytics</h2>
+              <p className="eyebrow">Your finances</p>
+              <h2>Spending overview</h2>
             </div>
             <TrendingUp size={18} />
           </div>
 
-          <div className="metric-grid">
+          <div className="metric-grid analytics-metric-grid">
             <div className="metric-card">
               <span>Expenses this month</span>
               <strong>{formatCurrency(monthlyExpense)}</strong>
             </div>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Categories</p>
-              <h2>Top spending</h2>
+            <div className="metric-card">
+              <span>Transactions this month</span>
+              <strong>{currentMonthTransactions.length}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Average per day</span>
+              <strong>{formatCurrency(averageDailyExpense)}</strong>
+            </div>
+            <div className="metric-card">
+              <span>Largest expense this month</span>
+              <strong>{formatCurrency(largestExpense)}</strong>
             </div>
           </div>
 
-          <div className="category-list">
+          <p className={`analytics-comparison${monthChange === null || monthChange === 0 ? '' : monthChange > 0 ? ' increase' : ' decrease'}`}>
+            {monthChange === null
+              ? `Previous month: ${formatCurrency(previousMonthExpense)} · not enough data to compare`
+              : monthChange === 0
+                ? 'Spending is unchanged from last month'
+              : `${Math.abs(monthChange).toFixed(1)}% ${monthChange > 0 ? 'more' : 'less'} than last month`}
+          </p>
+        </section>
+
+        <section className="panel analytics-section">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Trend</p>
+              <h2>Monthly spending</h2>
+            </div>
+          </div>
+          <div className="monthly-trend-chart" role="img" aria-label="Expense totals for the last six months">
+            {monthlyExpenseTrend.map((month) => {
+              const barHeight = month.amount > 0 ? Math.max(8, (month.amount / highestTrendAmount) * 100) : 0;
+              return (
+                <div className="monthly-trend-column" key={month.month}>
+                  <strong title={`${month.month}: ${formatCurrency(month.amount)}`}>
+                    {month.amount ? formatCurrency(month.amount) : '—'}
+                  </strong>
+                  <div className="monthly-trend-track">
+                    <span style={{ height: `${barHeight}%` }} />
+                  </div>
+                  <small>{monthLabel(month.date)}</small>
+                </div>
+              );
+            })}
+          </div>
+          <p className="analytics-footnote">Expense totals by month · PKR</p>
+        </section>
+
+        <section className="panel analytics-section">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">This month</p>
+              <h2>Spending by category</h2>
+            </div>
+          </div>
+
+          <div className="analytics-donut-layout">
             {categoryTotals.length === 0 ? (
               <div className="empty-state">No expense data is available yet.</div>
             ) : (
-              categoryTotals.map(([label, total]) => (
+              <>
+                <div
+                  className="analytics-donut"
+                  role="img"
+                  aria-label={`Category spending breakdown totaling ${formatCurrency(categoryTotal)}`}
+                  style={{ background: `conic-gradient(${categoryGradient})` }}
+                >
+                  <span>
+                    <small>Total spent</small>
+                    <strong>{formatCurrency(categoryTotal)}</strong>
+                  </span>
+                </div>
+                <div className="analytics-donut-legend">
+                  {categoryTotals.map(([label, total], index) => {
+                    const share = categoryTotal > 0 ? (total / categoryTotal) * 100 : 0;
+                    return (
+                      <div className="analytics-donut-item" key={label}>
+                        <i style={{ background: categoryColors[index % categoryColors.length] }} />
+                        <span>{label}</span>
+                        <strong>{share.toFixed(1)}%</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="panel analytics-section">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">This month</p>
+              <h2>Spending by payment method</h2>
+            </div>
+          </div>
+          <div className="category-list">
+            {paymentMethodTotals.length === 0 ? (
+              <div className="empty-state">No expense data is available yet.</div>
+            ) : (
+              paymentMethodTotals.map(({ label, amount }) => (
                 <div key={label} className="category-row">
                   <span>{label}</span>
-                  <strong>{formatCurrency(total)}</strong>
+                  <strong>{formatCurrency(amount)}</strong>
                 </div>
               ))
             )}
@@ -1297,39 +1473,128 @@ function App() {
           <div className="panel-header">
             <div>
               <p className="eyebrow">Budget</p>
-              <h2>Total budget balance</h2>
+              <h2>Budget performance</h2>
             </div>
           </div>
-          <section className="budget-overall-summary">
-            <div className="budget-summary">
-              <div className="budget-summary-item">
-                <span>Total budget</span>
-                <strong>{formatCurrency(overallBudget)}</strong>
+          {overallBudget > 0 ? (
+            <section className="budget-overall-summary">
+              <div className="budget-summary">
+                <div className="budget-summary-item">
+                  <span>Total budget</span>
+                  <strong>{formatCurrency(overallBudget)}</strong>
+                </div>
+                <div className="budget-summary-item">
+                  <span>Total expenses</span>
+                  <strong>{formatCurrency(totalSpent)}</strong>
+                </div>
+                <div className="budget-summary-item">
+                  <span>{remainingBalance < 0 ? 'Spent over budget' : 'Remaining budget'}</span>
+                  <strong className={remainingBalance < 0 ? 'expense' : 'budget-change-value'}>
+                    {formatCurrency(Math.abs(remainingBalance))}
+                  </strong>
+                </div>
               </div>
-              <div className="budget-summary-item">
-                <span>Total expenses</span>
-                <strong>{formatCurrency(totalSpent)}</strong>
+              <div
+                className={`budget-progress${remainingBalance < 0 ? ' over-budget' : ''}`}
+                role="progressbar"
+                aria-label="Overall budget spent"
+                aria-valuemin="0"
+                aria-valuemax={overallBudget}
+                aria-valuenow={Math.min(totalSpent, overallBudget)}
+                aria-valuetext={`${Math.round(spendingPercent)}% used`}
+              >
+                <span style={{ width: `${Math.min(spendingPercent, 100)}%` }} />
               </div>
-              <div className="budget-summary-item">
-                <span>{remainingBalance < 0 ? 'Spent over budget' : 'Available balance'}</span>
-                <strong className={remainingBalance < 0 ? 'expense' : ''}>
-                  {formatCurrency(Math.abs(remainingBalance))}
-                </strong>
-              </div>
-            </div>
-            <div
-              className={`budget-progress${remainingBalance < 0 ? ' over-budget' : ''}`}
-              role="progressbar"
-              aria-label="Overall budget spent"
-              aria-valuemin="0"
-              aria-valuemax={overallBudget || undefined}
-              aria-valuenow={overallBudget ? Math.min(totalSpent, overallBudget) : totalSpent}
-              aria-valuetext={`${Math.round(spendingPercent)}% used`}
-            >
-              <span style={{ width: `${Math.min(spendingPercent, 100)}%` }} />
-            </div>
-          </section>
+              <p className="analytics-footnote">{Math.round(spendingPercent)}% of your total budget has been used.</p>
+            </section>
+          ) : (
+            <div className="empty-state">Add a budget to see budget performance here.</div>
+          )}
         </section>
+
+        <section className="panel analytics-section analytics-budget-analysis">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Analysis</p>
+              <h2>Budget vs. spending</h2>
+            </div>
+          </div>
+          {(() => {
+            const chartWidth = 360;
+            const chartHeight = 190;
+            const left = 22;
+            const right = 338;
+            const top = 16;
+            const bottom = 148;
+            const plotHeight = bottom - top;
+            const hasMonthlyBudget = monthlyBudgetTrend.some((month) => month.budget !== null);
+            const maxValue = Math.max(
+              1,
+              ...monthlyBudgetTrend.map((month) => Math.max(month.amount, month.budget || 0))
+            );
+            const xForIndex = (index) => left + ((right - left) * index) / (monthlyBudgetTrend.length - 1);
+            const yForValue = (value) => bottom - (value / maxValue) * plotHeight;
+            const budgetPoints = monthlyBudgetTrend
+              .filter((month) => month.budget !== null)
+              .map((month) => {
+                const index = monthlyBudgetTrend.indexOf(month);
+                return `${xForIndex(index)},${yForValue(month.budget)}`;
+              });
+            const budgetLinePath = budgetPoints.length
+              ? budgetPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point}`).join(' ')
+              : '';
+
+            return (
+              <>
+                <svg
+                  className="monthly-analysis-chart"
+                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                  role="img"
+                  aria-label="Monthly expense bars compared with available monthly budget"
+                >
+                  {[0, 1, 2, 3].map((line) => {
+                    const y = top + (plotHeight * line) / 3;
+                    return <line key={line} className="chart-gridline" x1={left} x2={right} y1={y} y2={y} />;
+                  })}
+                  {monthlyBudgetTrend.map((month, index) => {
+                    const x = xForIndex(index);
+                    const expenseY = yForValue(month.amount);
+                    return (
+                      <g key={month.month}>
+                        <rect
+                          className="analysis-expense-bar"
+                          x={x - 12}
+                          y={expenseY}
+                          width="24"
+                          height={Math.max(2, bottom - expenseY)}
+                          rx="4"
+                        >
+                          <title>{`${month.month}: Expenses ${formatCurrency(month.amount)}`}</title>
+                        </rect>
+                        <text className="weekly-chart-date" x={x} y="172" textAnchor="middle">
+                          {monthLabel(month.date)}
+                        </text>
+                        {month.budget !== null ? (
+                          <circle className="analysis-budget-point" cx={x} cy={yForValue(month.budget)} r="3.5">
+                            <title>{`${month.month}: Budget ${formatCurrency(month.budget)}`}</title>
+                          </circle>
+                        ) : null}
+                      </g>
+                    );
+                  })}
+                  {budgetLinePath ? <path className="analysis-budget-line" d={budgetLinePath} /> : null}
+                </svg>
+                <div className="weekly-chart-legend" aria-label="Chart legend">
+                  <span><i className="weekly-legend-dot expense-dot" />Expenses</span>
+                  <span><i className="weekly-legend-dot budget-dot" />{hasMonthlyBudget ? 'Monthly budget' : 'No monthly budget history'}</span>
+                </div>
+                <p className="analytics-footnote">Compare monthly expense totals with saved budgets and budget additions · PKR</p>
+              </>
+            );
+          })()}
+        </section>
+
+        <p className="analytics-data-note">Income, cash-flow and savings-rate reports aren’t shown because this app currently records expenses only.</p>
       </div>
     );
   };

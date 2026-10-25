@@ -9,10 +9,52 @@ import {
   calculateExpenseTotal,
   createBudgetHistoryEntry,
   buildBackupPayload,
+  normalizeBackupData,
+  parseBackupPayload,
+  restoreBackupData,
+  buildMonthlyBudgetTrend,
+  buildMonthlyExpenseTrend,
+  buildWeeklyBudgetTrend,
   getLocalDateString,
   formatDate,
   validateTransaction
 } from './finance';
+
+const completeBackupData = () => ({
+  transactions: [{
+    id: 15,
+    title: 'Groceries',
+    amount: 12550,
+    type: 'expense',
+    categoryId: 'cat-food',
+    paymentMethodId: 'pm-cash',
+    date: '2026-10-24',
+    notes: 'Weekly shop',
+    createdAt: '2026-10-24T12:00:00.000Z'
+  }],
+  categories: [{ id: 'cat-food', name: 'Food', type: 'expense' }],
+  paymentMethods: [{ id: 'pm-cash', name: 'Cash' }],
+  budgets: [{ id: 'budget-2026-10-food', categoryId: 'cat-food', month: '2026-10', amount: 25000 }],
+  budgetHistory: [{
+    id: 7,
+    month: '2026-10',
+    categoryId: 'cat-food',
+    date: '2026-10-24',
+    createdAt: '2026-10-24T12:00:00.000Z',
+    previousAmount: null,
+    amount: 25000,
+    description: 'Monthly budget'
+  }],
+  preferences: [{
+    id: 'app',
+    currency: 'PKR',
+    lightMode: false,
+    name: 'A User',
+    onboardingCompleted: true,
+    dateFormat: 'YYYY-MM-DD',
+    notificationsEnabled: true
+  }]
+});
 
 describe('finance utilities', () => {
   it('converts rupees to paisa correctly', () => {
@@ -102,25 +144,144 @@ describe('finance utilities', () => {
     expect(createBudgetHistoryEntry('2026-10', 'cat-food', 125000, null, '', '2026-10-24', timestamp).amount).toBeNull();
   });
 
-  it('includes budgets in version 2 backups', () => {
-    const budget = { id: 'budget-2026-10-overall', categoryId: 'overall', month: '2026-10', amount: 125000 };
-    const history = {
-      id: 1,
-      month: '2026-10',
-      date: '2026-10-24',
-      createdAt: '2026-10-24T12:00:00.000Z',
-      previousAmount: null,
-      amount: 125000
-    };
-    const backup = JSON.parse(buildBackupPayload({
-      transactions: [],
-      budgets: [budget],
-      budgetHistory: [history]
-    }));
+  it('round trips every database collection and preserves preferences in v3 backups', () => {
+    const data = completeBackupData();
+    const backup = JSON.parse(buildBackupPayload(data));
+    const restored = normalizeBackupData(backup);
 
-    expect(backup.version).toBe(2);
-    expect(backup.budgets).toEqual([budget]);
-    expect(backup.budgetHistory).toEqual([history]);
+    expect(backup.version).toBe(3);
+    expect(backup.exportedAt).toBeTruthy();
+    expect(restored.transactions).toEqual(data.transactions);
+    expect(restored.categories).toEqual(data.categories);
+    expect(restored.paymentMethods).toEqual(data.paymentMethods);
+    expect(restored.budgets).toEqual(data.budgets);
+    expect(restored.budgetHistory).toEqual(data.budgetHistory);
+    expect(restored.preferences).toEqual(data.preferences);
+  });
+
+  it('recovers missing and unknown payment methods without breaking transaction references', () => {
+    const backup = completeBackupData();
+    backup.paymentMethods = [{ id: 'pm-cash', name: 'Cash' }];
+    backup.transactions = [
+      { ...backup.transactions[0], paymentMethodId: 'pm-legacy' },
+      { ...backup.transactions[0], id: 16, paymentMethodId: undefined }
+    ];
+
+    const restored = normalizeBackupData({
+      version: 3,
+      ...backup
+    });
+
+    expect(restored.transactions.map((transaction) => transaction.paymentMethodId))
+      .toEqual(['pm-legacy', 'pm-other']);
+    expect(restored.paymentMethods).toContainEqual({
+      id: 'pm-legacy',
+      name: 'Recovered method (pm-legacy)'
+    });
+    expect(restored.paymentMethods).toContainEqual({ id: 'pm-other', name: 'Other' });
+    expect(restored.warnings).toHaveLength(2);
+  });
+
+  it('accepts older backups without preferences or payment methods', () => {
+    const restored = normalizeBackupData({
+      version: 2,
+      transactions: [{
+        id: 1,
+        title: 'Lunch',
+        amount: 12.5,
+        type: 'expense',
+        categoryId: 'cat-food',
+        date: '2026-10-24'
+      }],
+      categories: [{ id: 'cat-food', name: 'Food', type: 'expense' }],
+      budgets: [{ id: 'budget-2026-10-food', categoryId: 'cat-food', month: '2026-10', amount: 12500 }]
+    });
+
+    expect(restored.transactions[0].amount).toBe(1250);
+    expect(restored.transactions[0].paymentMethodId).toBe('pm-other');
+    expect(restored.preferences).toBeNull();
+    expect(restored.paymentMethods.some((method) => method.id === 'pm-other')).toBe(true);
+    expect(restored.budgets[0].amount).toBe(12500);
+    expect(restored.warnings).toContain('1 transaction(s) without a payment method were assigned to Other.');
+
+    const versionOne = normalizeBackupData({
+      version: 1,
+      transactions: [{
+        id: 2,
+        title: 'Tea',
+        amount: 12.5,
+        type: 'expense',
+        categoryId: 'cat-food',
+        date: '2026-10-24'
+      }],
+      categories: [{ id: 'cat-food', name: 'Food', type: 'expense' }],
+      budgets: [{ id: 'budget-2026-10-food', categoryId: 'cat-food', month: '2026-10', amount: 125 }]
+    });
+    expect(versionOne.transactions[0].amount).toBe(1250);
+    expect(versionOne.budgets[0].amount).toBe(12500);
+  });
+
+  it('rejects malformed JSON and incomplete or malformed v3 backups', () => {
+    expect(() => parseBackupPayload('{not-json')).toThrow('Backup file is not valid JSON.');
+    expect(() => buildBackupPayload({ transactions: [] }))
+      .toThrow('A complete backup requires every data collection and app preferences.');
+
+    const incomplete = completeBackupData();
+    delete incomplete.budgetHistory;
+    expect(() => normalizeBackupData({ version: 3, ...incomplete }))
+      .toThrow('Backup collection "budgetHistory" is missing or invalid.');
+
+    const missingRequiredField = completeBackupData();
+    delete missingRequiredField.transactions[0].title;
+    expect(() => normalizeBackupData({ version: 3, ...missingRequiredField }))
+      .toThrow('Backup transactions contain an invalid record.');
+  });
+
+  it('preserves existing records when a restore write fails inside its transaction', async () => {
+    const makeTable = (initialRows, shouldFail = false) => {
+      let rows = initialRows;
+      return {
+        clear: async () => { rows = []; },
+        bulkPut: async (records) => {
+          if (shouldFail) throw new Error('simulated write failure');
+          rows = [...rows, ...records];
+        },
+        getRows: () => rows,
+        restoreRows: (snapshot) => { rows = snapshot; }
+      };
+    };
+    const database = {
+      transactions: makeTable([{ id: 1, title: 'Existing transaction' }]),
+      categories: makeTable([{ id: 'existing-category' }]),
+      paymentMethods: makeTable([{ id: 'existing-method' }]),
+      budgets: makeTable([{ id: 'existing-budget' }], true),
+      budgetHistory: makeTable([{ id: 1, description: 'Existing history' }]),
+      preferences: makeTable([{ id: 'app', name: 'Existing preferences' }])
+    };
+    database.transaction = async (...args) => {
+      const tables = args.slice(1, -1);
+      const callback = args[args.length - 1];
+      const snapshots = tables.map((table) => table.getRows());
+      try {
+        await callback();
+      } catch (error) {
+        tables.forEach((table, index) => table.restoreRows(snapshots[index]));
+        throw error;
+      }
+    };
+    const before = Object.fromEntries(
+      Object.entries(database)
+        .filter(([, table]) => typeof table.getRows === 'function')
+        .map(([name, table]) => [name, table.getRows()])
+    );
+
+    await expect(restoreBackupData(database, normalizeBackupData({
+      version: 3,
+      ...completeBackupData()
+    }))).rejects.toThrow('simulated write failure');
+    for (const [name, rows] of Object.entries(before)) {
+      expect(database[name].getRows()).toEqual(rows);
+    }
   });
 
   it('formats dates using the local calendar date', () => {
@@ -133,6 +294,70 @@ describe('finance utilities', () => {
     expect(formatDate(date, 'DD/MM/YYYY')).toBe('03/10/2026');
     expect(formatDate(date, 'MM/DD/YYYY')).toBe('10/03/2026');
     expect(formatDate(date, 'YYYY-MM-DD')).toBe('2026-10-03');
+  });
+
+  it('builds a seven-day daily expense and remaining budget trend', () => {
+    const trend = buildWeeklyBudgetTrend([
+      { type: 'expense', date: '2026-10-03', amount: 50 },
+      { type: 'expense', date: '2026-10-05', amount: 20 },
+      { type: 'expense', date: '2026-10-05', amount: 5 },
+      { type: 'income', date: '2026-10-05', amount: 100 },
+      { type: 'expense', date: '2026-10-11', amount: 30 }
+    ], 200, new Date(2026, 9, 10));
+
+    expect(trend).toHaveLength(7);
+    expect(trend[0]).toMatchObject({
+      isoDate: '2026-10-04',
+      expenses: 0,
+      totalExpenses: 50,
+      remainingBudget: 150
+    });
+    expect(trend[1]).toMatchObject({
+      isoDate: '2026-10-05',
+      expenses: 25,
+      totalExpenses: 75,
+      remainingBudget: 125
+    });
+    expect(trend[6]).toMatchObject({
+      isoDate: '2026-10-10',
+      expenses: 0,
+      totalExpenses: 75,
+      remainingBudget: 125
+    });
+  });
+
+  it('builds a six-month expense trend and ignores income', () => {
+    const trend = buildMonthlyExpenseTrend([
+      { type: 'expense', date: '2026-07-03', amount: 25 },
+      { type: 'expense', date: '2026-08-03', amount: 100 },
+      { type: 'income', date: '2026-08-05', amount: 500 },
+      { type: 'expense', date: '2026-10-01', amount: 60 },
+      { type: 'expense', date: '2026-04-30', amount: 1000 }
+    ], 6, new Date(2026, 9, 25));
+
+    expect(trend.map(({ month, amount }) => [month, amount])).toEqual([
+      ['2026-05', 0],
+      ['2026-06', 0],
+      ['2026-07', 25],
+      ['2026-08', 100],
+      ['2026-09', 0],
+      ['2026-10', 60]
+    ]);
+  });
+
+  it('compares monthly expenses with category budgets and budget additions', () => {
+    const trend = buildMonthlyBudgetTrend(
+      [{ type: 'expense', date: '2026-10-03', amount: 75 }],
+      [{ id: 'budget-2026-10-food', month: '2026-10', categoryId: 'food', amount: 20000 }],
+      [{ month: '2026-09', entryType: 'addition', amount: 15000 }],
+      2,
+      new Date(2026, 9, 25)
+    );
+
+    expect(trend.map(({ month, amount, budget }) => [month, amount, budget])).toEqual([
+      ['2026-09', 0, 150],
+      ['2026-10', 75, 200]
+    ]);
   });
 
   it('rejects transactions with missing or invalid dates', () => {
