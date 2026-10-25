@@ -9,6 +9,29 @@ This phase adds email/password authentication and a PostgreSQL schema foundation
 3. Confirm that the six tables exist under `public`: `transactions`, `categories`, `payment_methods`, `budgets`, `budget_history`, and `preferences`. Each table has RLS enabled, authenticated-only grants, and separate ownership policies for SELECT, INSERT, UPDATE, and DELETE.
 4. The migration stores source monthly budgets only. It intentionally has no `month = 'all'` budget row, so the device-local derived `budget-all-overall` total cannot be uploaded as a second contribution.
 
+To inspect RLS activation and policy operations in the Dashboard SQL Editor, run:
+
+```sql
+SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled
+FROM pg_class AS c
+JOIN pg_namespace AS n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relname IN (
+    'transactions', 'categories', 'payment_methods',
+    'budgets', 'budget_history', 'preferences'
+  )
+ORDER BY c.relname;
+
+SELECT tablename, policyname, cmd, roles
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename IN (
+    'transactions', 'categories', 'payment_methods',
+    'budgets', 'budget_history', 'preferences'
+  )
+ORDER BY tablename, cmd;
+```
+
 The migration links transaction/category/payment references by `(user_id, sync_id)`. Composite foreign keys reject a reference to another user's category or payment method. Device-local numeric/text IDs are not cloud relationship keys.
 
 ## Configure email/password Auth

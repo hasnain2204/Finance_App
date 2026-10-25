@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -20,8 +20,6 @@ import {
   WalletCards
 } from 'lucide-react';
 import { financeRepository } from './services/financeRepository';
-import { useSupabaseAuth } from './services/useSupabaseAuth';
-import CloudAccountPanel from './components/CloudAccountPanel';
 import { defaultCategories, defaultPaymentMethods } from './data/defaultData';
 import {
   buildMonthlyBudgetTrend,
@@ -51,6 +49,7 @@ const initialForm = {
 
 const navItems = ['home', 'transactions', 'analytics', 'budget'];
 const budgetCategories = ['Salary', 'Freelance', 'Other'];
+const CloudAccountPanel = lazy(() => import('./components/CloudAccountPanel'));
 
 function MigrationVerificationSummary({ report }) {
   if (!report) return null;
@@ -94,7 +93,6 @@ function MigrationVerificationSummary({ report }) {
 }
 
 function App() {
-  const cloudAuth = useSupabaseAuth();
   const [tab, setTab] = useState('home');
   const [transactions, setTransactions] = useState([]);
   const [budgetHistory, setBudgetHistory] = useState([]);
@@ -1588,11 +1586,7 @@ function App() {
           <button type="button" className="more-row" onClick={() => setTab('cloud-account')}>
             <span>Sign in or create account</span>
             <span className="more-row-trailing">
-              <span className="more-row-value">
-                {cloudAuth.loading
-                  ? 'Checking…'
-                  : cloudAuth.user?.email || (cloudAuth.isConfigured ? 'Signed out' : 'Setup needed')}
-              </span>
+              <span className="more-row-value">Optional</span>
               <ChevronRight className="more-chevron" size={20} />
             </span>
           </button>
@@ -2371,7 +2365,11 @@ function App() {
   }
 
   if (tab === 'cloud-account') {
-    return <CloudAccountPanel auth={cloudAuth} onBack={() => setTab('more')} />;
+    return (
+      <Suspense fallback={<main className="account-shell" role="status">Loading account tools…</main>}>
+        <CloudAccountPanel onBack={() => setTab('more')} />
+      </Suspense>
+    );
   }
 
   if (tab === 'payment-methods') {

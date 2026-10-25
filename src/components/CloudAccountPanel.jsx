@@ -1,7 +1,9 @@
 import { ArrowLeft, Cloud, LogIn, LogOut, UserPlus } from 'lucide-react';
 import { useState } from 'react';
+import { useSupabaseAuth } from '../services/useSupabaseAuth';
 
-export default function CloudAccountPanel({ auth, onBack }) {
+export default function CloudAccountPanel({ onBack }) {
+  const auth = useSupabaseAuth();
   const [mode, setMode] = useState('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
