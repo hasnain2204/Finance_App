@@ -101,12 +101,18 @@ export function useSupabaseAuth(client = supabaseClient, configuration = supabas
     }
   }, [client, configuration.error]);
 
-  const signUp = useCallback((email, password) => runAuthAction(
-    () => client.auth.signUp({ email: email.trim(), password }),
-    (data) => data?.session
-      ? 'Account created and signed in. Local finance data remains on this device.'
-      : `Account created. Check ${email.trim()} for a confirmation email before signing in.`
-  ), [client, runAuthAction]);
+const signUp = useCallback((email, password) => runAuthAction(
+  () => client.auth.signUp({
+    email: email.trim(),
+    password,
+    options: {
+      emailRedirectTo: window.location.origin
+    }
+  }),
+  (data) => data?.session
+    ? 'Account created and signed in. Local finance data remains on this device.'
+    : `Account created. Check ${email.trim()} for a confirmation email before signing in.`
+), [client, runAuthAction]);
 
   const signIn = useCallback((email, password) => runAuthAction(
     () => client.auth.signInWithPassword({ email: email.trim(), password }),

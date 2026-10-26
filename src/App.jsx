@@ -1695,7 +1695,7 @@ function App() {
       <section className="about-content">
         <article className="about-intro-card">
           <WalletCards className="about-brand-icon" size={24} aria-hidden="true" />
-          <h2>PWS V1</h2>
+          <h2>PWS V1.2</h2>
           <p className="about-tagline">Manage your money simply.</p>
           <p className="about-description">A simple personal finance tool for students and users in Pakistan.</p>
         </article>
@@ -1711,7 +1711,7 @@ function App() {
         <section className="more-group about-details" aria-label="App information">
           <div className="more-row">
             <span>Version</span>
-            <span className="more-row-value">V1</span>
+            <span className="more-row-value">V1.2</span>
           </div>
           <div className="more-row">
             <span>Currency</span>
