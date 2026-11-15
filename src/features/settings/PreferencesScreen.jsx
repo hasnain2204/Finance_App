@@ -1,5 +1,5 @@
 import { dateFormatOptions, formatDate } from '../../lib/finance';
-import { BackHeader, StatusMessage } from '../../components/ui';
+import { BackHeader, StatusMessage, ThemedSelect } from '../../components/ui';
 
 export function PreferencesScreen({
   preferenceDateFormatDraft,
@@ -18,18 +18,17 @@ export function PreferencesScreen({
       <form className="preferences-content" onSubmit={onSave}>
         <div className="preferences-date-field">
           <label htmlFor="date-format">Date Format</label>
-          <select
+          <ThemedSelect
             id="date-format"
+            name="dateFormat"
+            label="Date Format"
             value={preferenceDateFormatDraft}
             onChange={(event) => {
               setPreferenceDateFormatDraft(event.target.value);
               setPreferenceSaveStatus({ type: 'idle', message: '' });
             }}
-          >
-            {dateFormatOptions.map((dateFormat) => (
-              <option key={dateFormat} value={dateFormat}>{dateFormat}</option>
-            ))}
-          </select>
+            options={dateFormatOptions}
+          />
           <span className="preferences-date-example">
             Example: {formatDate(new Date(2026, 9, 3), preferenceDateFormatDraft)}
           </span>

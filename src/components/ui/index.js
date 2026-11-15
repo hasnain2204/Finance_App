@@ -6,3 +6,5 @@ export { NamedEntityManager } from './NamedEntityManager';
 export { ErrorBoundary } from './ErrorBoundary';
 export { AppLogo } from './AppLogo';
 export { CategoryIcon, getCategoryIconComponent } from './CategoryIcon';
+export { ThemedSelect } from './ThemedSelect';
+export { ThemedDatePicker } from './ThemedDatePicker';

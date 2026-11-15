@@ -7,8 +7,6 @@ export function CategoriesScreen({
   setCategoryNameDraft,
   categoryEditStatus,
   setCategoryEditStatus,
-  showAddCategoryForm,
-  setShowAddCategoryForm,
   categoryInput,
   setCategoryInput,
   categoryToDelete,
@@ -17,11 +15,13 @@ export function CategoriesScreen({
   onSave,
   onAdd,
   onDelete,
-  onBack
+  onBack,
+  defaultCategoryId,
+  onSelectDefault
 }) {
   return (
     <NamedEntityManager
-      title="Account"
+      title="Categories"
       listAriaLabel="Categories"
       items={categories}
       selectedId={selectedCategoryId}
@@ -49,12 +49,6 @@ export function CategoriesScreen({
       }
       nameLabel="Category Name"
       nameInputId="account-category-name"
-      showAddForm={showAddCategoryForm}
-      onToggleAddForm={() => {
-        setShowAddCategoryForm((current) => !current);
-        setCategoryInput('');
-        setCategoryEditStatus({ type: 'idle', message: '' });
-      }}
       addFormId="account-add-category-form"
       addInput={categoryInput}
       onAddInputChange={(event) => {
@@ -62,10 +56,12 @@ export function CategoriesScreen({
         setCategoryEditStatus({ type: 'idle', message: '' });
       }}
       onAdd={onAdd}
-      addButtonLabel="Add Category"
       addPlaceholder="Category name"
       addAriaLabel="Category name"
       onBack={onBack}
+      defaultItemId={defaultCategoryId}
+      onSelectDefault={onSelectDefault}
+      defaultLabel="Default Category"
     />
   );
 }

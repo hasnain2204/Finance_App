@@ -1,4 +1,4 @@
-import { BackHeader, StatusMessage } from '../../components/ui';
+import { BackHeader, StatusMessage, ThemedDatePicker, ThemedSelect } from '../../components/ui';
 
 export function AddTransactionScreen({
   editingTransactionId,
@@ -6,6 +6,7 @@ export function AddTransactionScreen({
   categories,
   paymentMethods,
   status,
+  dateFormat = 'DD MMM YYYY',
   onBack,
   onChange,
   onSubmit
@@ -43,29 +44,42 @@ export function AddTransactionScreen({
           <div className="form-inline-row">
             <label htmlFor="transaction-category" className="form-inline-label">Category</label>
             <div className="form-inline-control">
-              <select id="transaction-category" name="categoryId" value={form.categoryId} onChange={onChange}>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
+              <ThemedSelect
+                id="transaction-category"
+                name="categoryId"
+                label="Category"
+                value={form.categoryId}
+                onChange={onChange}
+                options={categories.map((c) => ({ value: c.id, label: c.name }))}
+              />
             </div>
           </div>
 
           <div className="form-inline-row">
             <label htmlFor="transaction-method" className="form-inline-label">Payment Method</label>
             <div className="form-inline-control">
-              <select id="transaction-method" name="paymentMethodId" value={form.paymentMethodId} onChange={onChange}>
-                {paymentMethods.map((method) => (
-                  <option key={method.id} value={method.id}>{method.name}</option>
-                ))}
-              </select>
+              <ThemedSelect
+                id="transaction-method"
+                name="paymentMethodId"
+                label="Payment Method"
+                value={form.paymentMethodId}
+                onChange={onChange}
+                options={paymentMethods.map((m) => ({ value: m.id, label: m.name }))}
+              />
             </div>
           </div>
 
           <div className="form-inline-row">
             <label htmlFor="transaction-date" className="form-inline-label">Date</label>
             <div className="form-inline-control">
-              <input id="transaction-date" name="date" type="date" value={form.date} onChange={onChange} />
+              <ThemedDatePicker
+                id="transaction-date"
+                name="date"
+                label="Date"
+                value={form.date}
+                onChange={onChange}
+                dateFormat={dateFormat}
+              />
             </div>
           </div>
 

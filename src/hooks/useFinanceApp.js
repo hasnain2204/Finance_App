@@ -20,6 +20,13 @@ import {
 
 export const navItems = ['home', 'transactions', 'analytics', 'budget'];
 export const budgetCategories = ['Salary', 'Freelance', 'Other'];
+export const defaultBudgetTypes = [
+  { id: 'bt-salary', name: 'Salary' },
+  { id: 'bt-freelance', name: 'Freelance' },
+  { id: 'bt-business', name: 'Business' },
+  { id: 'bt-investment', name: 'Investment' },
+  { id: 'bt-other', name: 'Other' }
+];
 
 const initialForm = {
   title: '',
@@ -68,6 +75,12 @@ export function useFinanceApp(repository = financeRepository) {
   const [paymentMethodEditStatus, setPaymentMethodEditStatus] = useState({ type: 'idle', message: '' });
   const [paymentMethodToDelete, setPaymentMethodToDelete] = useState(null);
   const [showAddPaymentMethodForm, setShowAddPaymentMethodForm] = useState(false);
+  const [budgetTypes, setBudgetTypes] = useState(defaultBudgetTypes);
+  const [selectedBudgetTypeId, setSelectedBudgetTypeId] = useState(defaultBudgetTypes[0].id);
+  const [budgetTypeNameDraft, setBudgetTypeNameDraft] = useState(defaultBudgetTypes[0].name);
+  const [budgetTypeEditStatus, setBudgetTypeEditStatus] = useState({ type: 'idle', message: '' });
+  const [budgetTypeInput, setBudgetTypeInput] = useState('');
+  const [budgetTypeToDelete, setBudgetTypeToDelete] = useState(null);
   const [restoreCandidate, setRestoreCandidate] = useState(null);
   const [migrationReport, setMigrationReport] = useState(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
@@ -162,6 +175,13 @@ export function useFinanceApp(repository = financeRepository) {
       setBudgetHistory(allBudgetHistory);
       setCategories(allCategories.filter((category) => category.type === 'expense'));
       setPaymentMethods(allMethods.length ? allMethods : defaultPaymentMethods);
+      if (Array.isArray(appPreferences?.budgetTypes) && appPreferences.budgetTypes.length > 0) {
+        setBudgetTypes(appPreferences.budgetTypes);
+        const defId = appPreferences.defaultBudgetTypeId || appPreferences.budgetTypes[0].id;
+        setSelectedBudgetTypeId(defId);
+        const defItem = appPreferences.budgetTypes.find((b) => b.id === defId) || appPreferences.budgetTypes[0];
+        setBudgetTypeNameDraft(defItem.name);
+      }
       setBudgets(allBudgets);
       const loadedPrefs = {
         id: 'app',
@@ -255,6 +275,50 @@ export function useFinanceApp(repository = financeRepository) {
     }
   };
 
+  const handleSaveAppearance = async (isLightMode) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', currency: 'PKR', dateFormat: 'DD MMM YYYY' }),
+      lightMode: Boolean(isLightMode)
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Could not save appearance preference.' };
+    }
+  };
+
+  const handleSaveDateFormat = async (dateFormat) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+      dateFormat
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setPreferenceDateFormatDraft(dateFormat);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Could not save date format.' };
+    }
+  };
+
+  const handleSaveNotifications = async (enabled) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+      notificationsEnabled: Boolean(enabled)
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setPreferenceNotificationsDraft(Boolean(enabled));
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Could not save notification settings.' };
+    }
+  };
+
   const handleInputChange = (event) => {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
@@ -305,12 +369,31 @@ export function useFinanceApp(repository = financeRepository) {
       });
       await loadData();
       setEditingBudgetHistoryId(null);
-      setBudgetForm({ date: getLocalDateString(), budgetCategory: 'Salary', amount: '', description: '' });
+      const defaultBudgetType = (preferences?.budgetTypes || budgetTypes).find(
+        (b) => b.id === preferences?.defaultBudgetTypeId
+      )?.name || budgetTypes[0]?.name || 'Salary';
+      setBudgetForm({ date: getLocalDateString(), budgetCategory: defaultBudgetType, amount: '', description: '' });
       setSelectedTransaction(null);
       setStatus({ type: 'success', message: 'Budget saved.' });
+      setTab('budget');
     } catch (error) {
       setStatus({ type: 'error', message: 'Could not save budget. Please try again.' });
     }
+  };
+
+  const openAddBudget = () => {
+    setEditingBudgetHistoryId(null);
+    const defaultBudgetType = (preferences?.budgetTypes || budgetTypes).find(
+      (b) => b.id === preferences?.defaultBudgetTypeId
+    )?.name || budgetTypes[0]?.name || 'Salary';
+    setBudgetForm({
+      date: getLocalDateString(),
+      budgetCategory: defaultBudgetType,
+      amount: '',
+      description: ''
+    });
+    setStatus({ type: 'idle', message: '' });
+    setTab('add-budget');
   };
 
   const openBudgetHistoryEditor = (entry) => {
@@ -322,10 +405,7 @@ export function useFinanceApp(repository = financeRepository) {
       description: entry.description || ''
     });
     setStatus({ type: 'idle', message: '' });
-    setTab('budget');
-    requestAnimationFrame(() => {
-      budgetFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    setTab('add-budget');
   };
 
   const handleSubmit = async (event) => {
@@ -449,7 +529,7 @@ export function useFinanceApp(repository = financeRepository) {
   };
 
   const handleSavePaymentMethod = async (event) => {
-    event.preventDefault();
+    if (event?.preventDefault) event.preventDefault();
     const methodName = paymentMethodNameDraft.trim();
     if (!selectedPaymentMethodId || !methodName) {
       setPaymentMethodEditStatus({ type: 'error', message: 'Enter a payment method name before saving.' });
@@ -475,6 +555,22 @@ export function useFinanceApp(repository = financeRepository) {
       setPaymentMethodEditStatus({ type: 'success', message: 'Payment method updated.' });
     } catch (error) {
       setPaymentMethodEditStatus({ type: 'error', message: 'Could not update the payment method. Please try again.' });
+    }
+  };
+
+  const handleSaveDefaultPaymentMethod = async (paymentMethodId) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+      defaultPaymentMethodId: paymentMethodId
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setPaymentMethodEditStatus({ type: 'success', message: 'Default payment method updated.' });
+      return { success: true };
+    } catch (error) {
+      setPaymentMethodEditStatus({ type: 'error', message: 'Could not save default payment method.' });
+      return { success: false };
     }
   };
 
@@ -520,7 +616,7 @@ export function useFinanceApp(repository = financeRepository) {
   };
 
   const handleSaveCategory = async (event) => {
-    event.preventDefault();
+    if (event?.preventDefault) event.preventDefault();
     const categoryName = categoryNameDraft.trim();
     if (!selectedCategoryId || !categoryName) {
       setCategoryEditStatus({ type: 'error', message: 'Enter a category name before saving.' });
@@ -537,7 +633,7 @@ export function useFinanceApp(repository = financeRepository) {
     try {
       const updated = await repository.updateCategory(selectedCategoryId, categoryName);
       if (!updated) {
-        setCategoryEditStatus({ type: 'error', message: 'This category no longer exists. Reopen Account to refresh the list.' });
+        setCategoryEditStatus({ type: 'error', message: 'This category no longer exists. Reopen Categories to refresh the list.' });
         return;
       }
       setCategories((current) => current.map((category) => (
@@ -546,6 +642,22 @@ export function useFinanceApp(repository = financeRepository) {
       setCategoryEditStatus({ type: 'success', message: 'Category updated.' });
     } catch (error) {
       setCategoryEditStatus({ type: 'error', message: 'Could not update the category. Please try again.' });
+    }
+  };
+
+  const handleSaveDefaultCategory = async (categoryId) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+      defaultCategoryId: categoryId
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setCategoryEditStatus({ type: 'success', message: 'Default category updated.' });
+      return { success: true };
+    } catch (error) {
+      setCategoryEditStatus({ type: 'error', message: 'Could not save default category.' });
+      return { success: false };
     }
   };
 
@@ -581,6 +693,154 @@ export function useFinanceApp(repository = financeRepository) {
     } catch (error) {
       setCategoryEditStatus({ type: 'error', message: 'Could not remove the category. Please try again.' });
       setCategoryToDelete(null);
+    }
+  };
+
+  const openBudgetTypes = (type = budgetTypes[0]) => {
+    setSelectedBudgetTypeId(type?.id || null);
+    setBudgetTypeNameDraft(type?.name || '');
+    setBudgetTypeInput('');
+    setBudgetTypeEditStatus({ type: 'idle', message: '' });
+    setTab('budget-types');
+  };
+
+  const handleSelectBudgetType = (type) => {
+    setSelectedBudgetTypeId(type.id);
+    setBudgetTypeNameDraft(type.name);
+    setBudgetTypeEditStatus({ type: 'idle', message: '' });
+  };
+
+  const handleAddBudgetType = async () => {
+    const trimmed = budgetTypeInput.trim();
+    if (!trimmed) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'Enter a budget type name.' });
+      return;
+    }
+    if (budgetTypes.some((bt) => bt.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'A budget type with this name already exists.' });
+      return;
+    }
+
+    const newType = {
+      id: `bt-${Date.now()}`,
+      name: trimmed
+    };
+    const nextList = [...budgetTypes, newType];
+    try {
+      const nextPreferences = {
+        ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+        budgetTypes: nextList
+      };
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setBudgetTypes(nextList);
+      setSelectedBudgetTypeId(newType.id);
+      setBudgetTypeNameDraft(newType.name);
+      setBudgetTypeInput('');
+      setBudgetTypeEditStatus({ type: 'success', message: 'Budget type added.' });
+    } catch (error) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'Could not add budget type. Please try again.' });
+    }
+  };
+
+  const handleSaveBudgetType = async (event) => {
+    if (event?.preventDefault) event.preventDefault();
+    const typeName = budgetTypeNameDraft.trim();
+    if (!selectedBudgetTypeId || !typeName) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'Enter a budget type name before saving.' });
+      return;
+    }
+    if (budgetTypes.some((bt) => (
+      bt.id !== selectedBudgetTypeId &&
+      bt.name.toLocaleLowerCase() === typeName.toLocaleLowerCase()
+    ))) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'A budget type with this name already exists.' });
+      return;
+    }
+
+    const oldItem = budgetTypes.find((bt) => bt.id === selectedBudgetTypeId);
+    const oldName = oldItem?.name;
+    const nextList = budgetTypes.map((bt) => (
+      bt.id === selectedBudgetTypeId ? { ...bt, name: typeName } : bt
+    ));
+    try {
+      const nextPreferences = {
+        ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+        budgetTypes: nextList
+      };
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setBudgetTypes(nextList);
+      if (budgetForm.budgetCategory === oldName) {
+        setBudgetForm((current) => ({ ...current, budgetCategory: typeName }));
+      }
+      setBudgetTypeEditStatus({ type: 'success', message: 'Budget type updated.' });
+    } catch (error) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'Could not update budget type. Please try again.' });
+    }
+  };
+
+  const handleSaveDefaultBudgetType = async (budgetTypeId) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+      defaultBudgetTypeId: budgetTypeId
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      const chosen = budgetTypes.find((b) => b.id === budgetTypeId);
+      if (chosen) {
+        setBudgetForm((current) => ({ ...current, budgetCategory: chosen.name }));
+      }
+      setBudgetTypeEditStatus({ type: 'success', message: 'Default budget type updated.' });
+      return { success: true };
+    } catch (error) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'Could not save default budget type.' });
+      return { success: false };
+    }
+  };
+
+  const handleDeleteBudgetType = async () => {
+    if (!budgetTypeToDelete) return;
+    if (budgetTypes.length <= 1) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'At least one budget type must remain.' });
+      setBudgetTypeToDelete(null);
+      return;
+    }
+
+    const isUsed = budgetHistory.some(
+      (entry) => entry.budgetCategory === budgetTypeToDelete.name
+    );
+    if (isUsed) {
+      setBudgetTypeEditStatus({
+        type: 'error',
+        message: 'This budget type is used by existing budgets and cannot be removed.'
+      });
+      setBudgetTypeToDelete(null);
+      return;
+    }
+
+    const nextList = budgetTypes.filter((bt) => bt.id !== budgetTypeToDelete.id);
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+      budgetTypes: nextList,
+      defaultBudgetTypeId: preferences?.defaultBudgetTypeId === budgetTypeToDelete.id
+        ? nextList[0].id
+        : preferences?.defaultBudgetTypeId
+    };
+
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setBudgetTypes(nextList);
+      const nextSelected = nextList[0];
+      setSelectedBudgetTypeId(nextSelected.id);
+      setBudgetTypeNameDraft(nextSelected.name);
+      setBudgetTypeToDelete(null);
+      setBudgetTypeEditStatus({ type: 'success', message: 'Budget type removed.' });
+    } catch (error) {
+      setBudgetTypeEditStatus({ type: 'error', message: 'Could not remove budget type. Please try again.' });
+      setBudgetTypeToDelete(null);
     }
   };
 
@@ -698,8 +958,10 @@ export function useFinanceApp(repository = financeRepository) {
   const openAddExpense = () => {
     setEditingTransactionId(null);
     setSelectedTransaction(null);
-    const expenseCategory = categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
-    const cashMethod = paymentMethods.find((method) => method.name === 'Cash')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
+    const expenseCategory = preferences?.defaultCategoryId ||
+      categories.find((category) => category.name === 'Other')?.id || categories[0]?.id || defaultCategories[0].id;
+    const cashMethod = preferences?.defaultPaymentMethodId ||
+      paymentMethods.find((method) => method.name === 'Cash')?.id || paymentMethods[0]?.id || defaultPaymentMethods[0].id;
     setForm({
       ...initialForm,
       categoryId: expenseCategory,
@@ -753,6 +1015,7 @@ export function useFinanceApp(repository = financeRepository) {
     paymentMap,
     showDeleteConfirm,
     setShowDeleteConfirm,
+    openAddBudget,
     openBudgetHistoryEditor,
     openTransactionEditor,
     handleDelete,
@@ -836,7 +1099,30 @@ export function useFinanceApp(repository = financeRepository) {
     handleSaveBudget,
     openAccount,
     openPaymentMethods,
+    openBudgetTypes,
     openPreferences,
-    handleSaveCurrency
+    budgetTypes,
+    setBudgetTypes,
+    selectedBudgetTypeId,
+    setSelectedBudgetTypeId,
+    budgetTypeNameDraft,
+    setBudgetTypeNameDraft,
+    budgetTypeEditStatus,
+    setBudgetTypeEditStatus,
+    budgetTypeInput,
+    setBudgetTypeInput,
+    budgetTypeToDelete,
+    setBudgetTypeToDelete,
+    handleSelectBudgetType,
+    handleAddBudgetType,
+    handleSaveBudgetType,
+    handleSaveDefaultBudgetType,
+    handleDeleteBudgetType,
+    handleSaveCurrency,
+    handleSaveAppearance,
+    handleSaveDateFormat,
+    handleSaveNotifications,
+    handleSaveDefaultCategory,
+    handleSaveDefaultPaymentMethod
   };
 }

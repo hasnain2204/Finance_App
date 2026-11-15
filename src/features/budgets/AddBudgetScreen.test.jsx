@@ -1,0 +1,87 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent } from '@testing-library/react';
+import { AddBudgetScreen } from './AddBudgetScreen';
+
+describe('AddBudgetScreen', () => {
+  const dummyBudgetForm = {
+    amount: '50000',
+    budgetCategory: 'Salary',
+    date: '2026-11-16',
+    description: 'Monthly salary allocation'
+  };
+
+  it('renders budget form with inline rows, Amount first and required without Rs in label', () => {
+    const { container } = render(
+      <AddBudgetScreen
+        budgetFormRef={{ current: null }}
+        editingBudgetHistoryId={null}
+        form={dummyBudgetForm}
+        budgetTypes={[{ id: 'bt-1', name: 'Salary' }, { id: 'bt-2', name: 'Freelance' }]}
+        status={{ type: 'idle', message: '' }}
+        dateFormat="YYYY-MM-DD"
+        onBack={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+
+    // Verify Amount label does not contain (Rs) or (PKR)
+    const amountLabel = container.querySelector('label[for="budget-amount"]');
+    expect(amountLabel).not.toBeNull();
+    expect(amountLabel.textContent).toContain('Amount');
+    expect(amountLabel.textContent).not.toContain('(Rs)');
+    expect(amountLabel.textContent).not.toContain('(PKR)');
+
+    // Verify Amount input is required
+    const amountInput = container.querySelector('#budget-amount');
+    expect(amountInput.required).toBe(true);
+
+    // Verify 4 inline rows
+    const rows = container.querySelectorAll('.transaction-form .form-inline-row');
+    expect(rows.length).toBe(4);
+
+    expect(rows[0].querySelector('label').textContent).toContain('Amount');
+    expect(rows[1].querySelector('label').textContent).toContain('Category');
+    expect(rows[2].querySelector('label').textContent).toContain('Date');
+    expect(rows[3].querySelector('label').textContent).toContain('Description');
+
+    // Verify submit button for new budget
+    const submitBtn = container.querySelector('button[type="submit"]');
+    expect(submitBtn.textContent).toBe('Save Budget');
+  });
+
+  it('renders Edit Budget title and Save Changes button when editing', () => {
+    const handleSave = vi.fn((e) => e.preventDefault());
+    const handleBack = vi.fn();
+
+    const { container, getByRole, getByText } = render(
+      <AddBudgetScreen
+        budgetFormRef={{ current: null }}
+        editingBudgetHistoryId="bh-123"
+        form={dummyBudgetForm}
+        budgetTypes={[{ id: 'bt-1', name: 'Salary' }]}
+        status={{ type: 'idle', message: '' }}
+        dateFormat="YYYY-MM-DD"
+        onBack={handleBack}
+        onChange={vi.fn()}
+        onSave={handleSave}
+      />
+    );
+
+    // Check title
+    expect(getByText('Edit Budget')).toBeDefined();
+
+    // Check button
+    const submitBtn = container.querySelector('button[type="submit"]');
+    expect(submitBtn.textContent).toBe('Save Changes');
+
+    // Test back button
+    const backBtn = container.querySelector('.back-button');
+    fireEvent.click(backBtn);
+    expect(handleBack).toHaveBeenCalledTimes(1);
+
+    // Test submit
+    fireEvent.submit(container.querySelector('form'));
+    expect(handleSave).toHaveBeenCalledTimes(1);
+  });
+});

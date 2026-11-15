@@ -1,54 +1,103 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, fireEvent, act } from '@testing-library/react';
 import { BudgetScreen } from './BudgetScreen';
 
 describe('BudgetScreen', () => {
-  const dummyBudgetForm = {
-    amount: '50000',
-    budgetCategory: 'Salary',
-    date: '2026-11-16',
-    description: 'Monthly salary allocation'
-  };
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
 
-  it('renders budget form with inline rows, Amount first and required without Rs in label', () => {
-    const { container } = render(
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const dummyBudgetHistory = [
+    {
+      id: 'bh-1',
+      date: '2026-11-16',
+      createdAt: '2026-11-16T10:00:00.000Z',
+      budgetCategory: 'Salary',
+      amount: 5000000,
+      description: 'Monthly salary'
+    },
+    {
+      id: 'bh-2',
+      date: '2026-10-01',
+      createdAt: '2026-10-01T10:00:00.000Z',
+      budgetCategory: 'Freelance',
+      amount: 2500000,
+      description: 'Project advance'
+    }
+  ];
+
+  it('renders empty state when budget history is empty', () => {
+    const { getByText } = render(
       <BudgetScreen
-        budgetFormRef={{ current: null }}
-        budgetForm={dummyBudgetForm}
-        editingBudgetHistoryId={null}
-        status={{ type: 'idle', message: '' }}
         budgetHistory={[]}
-        categoryMap={{}}
-        paymentMap={{}}
-        dateFormat="YYYY-MM-DD"
-        onFormChange={vi.fn()}
-        onSave={vi.fn()}
+        onOpenAddBudget={vi.fn()}
         onOpenTransaction={vi.fn()}
       />
     );
 
-    // Verify Amount label does not contain (Rs) or (PKR)
-    const amountLabel = container.querySelector('label[for="budget-amount"]');
-    expect(amountLabel).not.toBeNull();
-    expect(amountLabel.textContent).toContain('Amount');
-    expect(amountLabel.textContent).not.toContain('(Rs)');
-    expect(amountLabel.textContent).not.toContain('(PKR)');
+    expect(getByText('No budget history yet.')).toBeDefined();
+  });
 
-    // Verify Amount input is required
-    const amountInput = container.querySelector('#budget-amount');
-    expect(amountInput.required).toBe(true);
+  it('renders budget items grouped by date and allows clicking an item', () => {
+    const handleOpenTransaction = vi.fn();
 
-    // Verify 4 inline rows
-    const rows = container.querySelectorAll('.budget-form .form-inline-row');
-    expect(rows.length).toBe(4);
+    const { getByText } = render(
+      <BudgetScreen
+        budgetHistory={dummyBudgetHistory}
+        dateFormat="YYYY-MM-DD"
+        onOpenAddBudget={vi.fn()}
+        onOpenTransaction={handleOpenTransaction}
+      />
+    );
 
-    expect(rows[0].querySelector('label').textContent).toContain('Amount');
-    expect(rows[1].querySelector('label').textContent).toContain('Category');
-    expect(rows[2].querySelector('label').textContent).toContain('Date');
-    expect(rows[3].querySelector('label').textContent).toContain('Description');
+    expect(getByText('Budget history')).toBeDefined();
+    expect(getByText('Monthly salary')).toBeDefined();
 
-    // Verify save button
-    const submitBtn = container.querySelector('button[type="submit"]');
-    expect(submitBtn.textContent).toBe('Save Budget');
+    // Click on item
+    fireEvent.click(getByText('Monthly salary'));
+    expect(handleOpenTransaction).toHaveBeenCalledTimes(1);
+    expect(handleOpenTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'bh-1',
+        historyType: 'budget',
+        returnTab: 'budget'
+      })
+    );
+  });
+
+  it('renders floating action button and manages expand/collapse timing', () => {
+    const handleOpenAddBudget = vi.fn();
+
+    const { container } = render(
+      <BudgetScreen
+        budgetHistory={[]}
+        onOpenAddBudget={handleOpenAddBudget}
+        onOpenTransaction={vi.fn()}
+      />
+    );
+
+    const fab = container.querySelector('.fab-button');
+    expect(fab).not.toBeNull();
+    expect(fab.classList.contains('is-expanded')).toBe(false);
+
+    // Fast-forward 2 seconds -> should expand
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(fab.classList.contains('is-expanded')).toBe(true);
+
+    // Fast-forward 10 more seconds (12s total) -> should collapse
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(fab.classList.contains('is-expanded')).toBe(false);
+
+    // Click floating action button
+    fireEvent.click(fab);
+    expect(handleOpenAddBudget).toHaveBeenCalledTimes(1);
   });
 });

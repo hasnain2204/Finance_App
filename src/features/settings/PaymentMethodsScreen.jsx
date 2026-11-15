@@ -7,8 +7,6 @@ export function PaymentMethodsScreen({
   setPaymentMethodNameDraft,
   paymentMethodEditStatus,
   setPaymentMethodEditStatus,
-  showAddPaymentMethodForm,
-  setShowAddPaymentMethodForm,
   methodInput,
   setMethodInput,
   paymentMethodToDelete,
@@ -17,7 +15,9 @@ export function PaymentMethodsScreen({
   onSave,
   onAdd,
   onDelete,
-  onBack
+  onBack,
+  defaultPaymentMethodId,
+  onSelectDefault
 }) {
   return (
     <NamedEntityManager
@@ -49,12 +49,6 @@ export function PaymentMethodsScreen({
       }
       nameLabel="Payment Method Name"
       nameInputId="payment-method-name"
-      showAddForm={showAddPaymentMethodForm}
-      onToggleAddForm={() => {
-        setShowAddPaymentMethodForm((current) => !current);
-        setMethodInput('');
-        setPaymentMethodEditStatus({ type: 'idle', message: '' });
-      }}
       addFormId="account-add-payment-method-form"
       addInput={methodInput}
       onAddInputChange={(event) => {
@@ -62,10 +56,12 @@ export function PaymentMethodsScreen({
         setPaymentMethodEditStatus({ type: 'idle', message: '' });
       }}
       onAdd={onAdd}
-      addButtonLabel="Add Payment Method"
       addPlaceholder="Payment method name"
       addAriaLabel="Payment method name"
       onBack={onBack}
+      defaultItemId={defaultPaymentMethodId}
+      onSelectDefault={onSelectDefault}
+      defaultLabel="Default Payment Method"
     />
   );
 }

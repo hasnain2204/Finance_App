@@ -14,16 +14,21 @@ import { TransactionsScreen } from './features/transactions/TransactionsScreen';
 import { AddTransactionScreen } from './features/transactions/AddTransactionScreen';
 import { TransactionDetailScreen } from './features/transactions/TransactionDetailScreen';
 import { BudgetScreen } from './features/budgets/BudgetScreen';
+import { AddBudgetScreen } from './features/budgets/AddBudgetScreen';
 import { CategoriesScreen } from './features/categories/CategoriesScreen';
 import { MoreScreen } from './features/settings/MoreScreen';
 import { PreferencesScreen } from './features/settings/PreferencesScreen';
 import { CurrencyScreen } from './features/settings/CurrencyScreen';
+import { AppearanceScreen } from './features/settings/AppearanceScreen';
+import { DateFormatScreen } from './features/settings/DateFormatScreen';
+import { NotificationsScreen } from './features/settings/NotificationsScreen';
 import { HelpScreen } from './features/settings/HelpScreen';
 import { AboutScreen } from './features/settings/AboutScreen';
 import { CloudSyncScreen } from './features/settings/CloudSyncScreen';
 import { ExportDataScreen } from './features/settings/ExportDataScreen';
 import { RestoreDataScreen } from './features/settings/RestoreDataScreen';
 import { PaymentMethodsScreen } from './features/settings/PaymentMethodsScreen';
+import { BudgetTypesScreen } from './features/settings/BudgetTypesScreen';
 import { OnboardingScreen } from './features/settings/OnboardingScreen';
 import { useCloudSync } from './services/CloudSyncContext';
 
@@ -64,6 +69,22 @@ function AppContent({ app, activateCloudRuntime }) {
     const shell = document.querySelector('.app-shell');
     if (shell) shell.scrollTop = 0;
   }, [tab]);
+
+  useEffect(() => {
+    const isDark = preferences?.lightMode === false;
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark-theme');
+      document.documentElement.setAttribute('data-theme', 'dark');
+      if (themeColorMeta) themeColorMeta.setAttribute('content', '#111614');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark-theme');
+      document.documentElement.setAttribute('data-theme', 'light');
+      if (themeColorMeta) themeColorMeta.setAttribute('content', '#17634f');
+    }
+  }, [preferences?.lightMode]);
 
   const handleNavClick = (name) => {
     const now = Date.now();
@@ -178,9 +199,26 @@ function AppContent({ app, activateCloudRuntime }) {
         categories={app.categories}
         paymentMethods={app.paymentMethods}
         status={status}
+        dateFormat={preferences?.dateFormat}
         onBack={() => setTab(app.editingTransactionId ? 'transactions' : 'home')}
         onChange={app.handleInputChange}
         onSubmit={app.handleSubmit}
+      />
+    );
+  }
+
+  if (tab === 'add-budget') {
+    return (
+      <AddBudgetScreen
+        budgetFormRef={app.budgetFormRef}
+        editingBudgetHistoryId={app.editingBudgetHistoryId}
+        form={app.budgetForm}
+        budgetTypes={app.budgetTypes}
+        status={status}
+        dateFormat={preferences?.dateFormat}
+        onBack={() => setTab('budget')}
+        onChange={app.handleBudgetFormChange}
+        onSave={app.handleSaveBudget}
       />
     );
   }
@@ -227,6 +265,8 @@ function AppContent({ app, activateCloudRuntime }) {
         onAdd={app.handleAddCategory}
         onDelete={app.handleDeleteCategory}
         onBack={() => setTab('more')}
+        defaultCategoryId={preferences?.defaultCategoryId}
+        onSelectDefault={app.handleSaveDefaultCategory}
       />
     );
   }
@@ -277,20 +317,51 @@ function AppContent({ app, activateCloudRuntime }) {
         onAdd={app.handleAddMethod}
         onDelete={app.handleDeletePaymentMethod}
         onBack={() => setTab('more')}
+        defaultPaymentMethodId={preferences?.defaultPaymentMethodId}
+        onSelectDefault={app.handleSaveDefaultPaymentMethod}
       />
     );
   }
 
-  if (tab === 'preferences') {
+  if (tab === 'budget-types') {
     return (
-      <PreferencesScreen
-        preferenceDateFormatDraft={app.preferenceDateFormatDraft}
-        setPreferenceDateFormatDraft={app.setPreferenceDateFormatDraft}
-        preferenceNotificationsDraft={app.preferenceNotificationsDraft}
-        setPreferenceNotificationsDraft={app.setPreferenceNotificationsDraft}
-        preferenceSaveStatus={app.preferenceSaveStatus}
-        setPreferenceSaveStatus={app.setPreferenceSaveStatus}
-        onSave={app.handleSavePreferences}
+      <BudgetTypesScreen
+        budgetTypes={app.budgetTypes}
+        selectedBudgetTypeId={app.selectedBudgetTypeId}
+        budgetTypeNameDraft={app.budgetTypeNameDraft}
+        setBudgetTypeNameDraft={app.setBudgetTypeNameDraft}
+        budgetTypeEditStatus={app.budgetTypeEditStatus}
+        setBudgetTypeEditStatus={app.setBudgetTypeEditStatus}
+        budgetTypeInput={app.budgetTypeInput}
+        setBudgetTypeInput={app.setBudgetTypeInput}
+        budgetTypeToDelete={app.budgetTypeToDelete}
+        setBudgetTypeToDelete={app.setBudgetTypeToDelete}
+        onSelect={app.handleSelectBudgetType}
+        onSave={app.handleSaveBudgetType}
+        onAdd={app.handleAddBudgetType}
+        onDelete={app.handleDeleteBudgetType}
+        onBack={() => setTab('more')}
+        defaultBudgetTypeId={preferences?.defaultBudgetTypeId}
+        onSelectDefault={app.handleSaveDefaultBudgetType}
+      />
+    );
+  }
+
+  if (tab === 'preferences' || tab === 'date-format') {
+    return (
+      <DateFormatScreen
+        currentDateFormat={preferences?.dateFormat || 'DD MMM YYYY'}
+        onSaveDateFormat={app.handleSaveDateFormat}
+        onBack={() => setTab('more')}
+      />
+    );
+  }
+
+  if (tab === 'notifications') {
+    return (
+      <NotificationsScreen
+        notificationsEnabled={Boolean(preferences?.notificationsEnabled)}
+        onSaveNotifications={app.handleSaveNotifications}
         onBack={() => setTab('more')}
       />
     );
@@ -301,6 +372,16 @@ function AppContent({ app, activateCloudRuntime }) {
       <CurrencyScreen
         currentCurrency={preferences?.currency || 'PKR'}
         onSelectCurrency={app.handleSaveCurrency}
+        onBack={() => setTab('more')}
+      />
+    );
+  }
+
+  if (tab === 'appearance') {
+    return (
+      <AppearanceScreen
+        isLightMode={preferences?.lightMode !== false}
+        onSaveAppearance={app.handleSaveAppearance}
         onBack={() => setTab('more')}
       />
     );
@@ -402,7 +483,7 @@ function AppContent({ app, activateCloudRuntime }) {
             paymentMap={app.paymentMap}
             dateFormat={preferences?.dateFormat}
             onOpenAddExpense={app.openAddExpense}
-            onOpenBudget={() => setTab('budget')}
+            onOpenBudget={app.openAddBudget}
             onOpenTransaction={app.openTransactionDetail}
           />
         )}
@@ -424,16 +505,11 @@ function AppContent({ app, activateCloudRuntime }) {
         )}
         {tab === 'budget' && (
           <BudgetScreen
-            budgetFormRef={app.budgetFormRef}
-            budgetForm={app.budgetForm}
-            editingBudgetHistoryId={app.editingBudgetHistoryId}
-            status={status}
             budgetHistory={app.budgetHistory}
             categoryMap={app.categoryMap}
             paymentMap={app.paymentMap}
             dateFormat={preferences?.dateFormat}
-            onFormChange={app.handleBudgetFormChange}
-            onSave={app.handleSaveBudget}
+            onOpenAddBudget={app.openAddBudget}
             onOpenTransaction={app.openTransactionDetail}
           />
         )}
@@ -447,6 +523,7 @@ function AppContent({ app, activateCloudRuntime }) {
             }}
             onOpenAccount={() => app.openAccount()}
             onOpenPaymentMethods={() => app.openPaymentMethods()}
+            onOpenBudgetTypes={() => app.openBudgetTypes()}
             onOpenExport={() => {
               setStatus({ type: 'idle', message: '' });
               setTab('export-data');
@@ -461,7 +538,10 @@ function AppContent({ app, activateCloudRuntime }) {
               setTab('cloud-sync');
             }}
             onOpenCurrency={() => setTab('currency')}
-            onOpenPreferences={app.openPreferences}
+            onOpenAppearance={() => setTab('appearance')}
+            onOpenDateFormat={() => setTab('date-format')}
+            onOpenNotifications={() => setTab('notifications')}
+            onOpenPreferences={() => setTab('date-format')}
             onOpenHelp={() => setTab('help')}
             onOpenAbout={() => {
               setTab('about');

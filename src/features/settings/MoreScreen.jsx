@@ -2,32 +2,29 @@ import { ChevronRight } from 'lucide-react';
 import { StatusMessage } from '../../components/ui';
 
 export function MoreScreen({
-  preferences,
   status,
   onOpenCloudAccount,
   onOpenAccount,
   onOpenPaymentMethods,
+  onOpenBudgetTypes,
   onOpenExport,
   onOpenRestore,
   onOpenCloudSync,
   onOpenCurrency,
+  onOpenAppearance,
   onOpenPreferences,
+  onOpenDateFormat,
+  onOpenNotifications,
   onOpenHelp,
   onOpenAbout
 }) {
   return (
     <div className="more-page">
-      <section className="more-group" aria-label="Account">
+      <section className="more-group" aria-label="Settings and options">
         <button type="button" className="more-row" onClick={onOpenCloudAccount}>
           <span>Account</span>
-          <span className="more-row-trailing">
-            <ChevronRight className="more-chevron" size={20} />
-          </span>
+          <ChevronRight className="more-chevron" size={20} />
         </button>
-      </section>
-
-      <section className="more-group" aria-labelledby="more-account-heading">
-        <h2 id="more-account-heading" className="more-group-title">Account</h2>
         <button type="button" className="more-row" onClick={onOpenAccount}>
           <span>Categories</span>
           <ChevronRight className="more-chevron" size={20} />
@@ -36,10 +33,10 @@ export function MoreScreen({
           <span>Payment Methods</span>
           <ChevronRight className="more-chevron" size={20} />
         </button>
-      </section>
-
-      <section className="more-group" aria-labelledby="more-data-heading">
-        <h2 id="more-data-heading" className="more-group-title">Data &amp; Backup</h2>
+        <button type="button" className="more-row" onClick={onOpenBudgetTypes}>
+          <span>Budget Types</span>
+          <ChevronRight className="more-chevron" size={20} />
+        </button>
         <button type="button" className="more-row" onClick={onOpenExport}>
           <span>Export Data</span>
           <ChevronRight className="more-chevron" size={20} />
@@ -52,36 +49,22 @@ export function MoreScreen({
           <span>Cloud Sync</span>
           <ChevronRight className="more-chevron" size={20} />
         </button>
-        <StatusMessage type={status.type} message={status.message} />
-      </section>
-
-      <section className="more-group" aria-labelledby="more-preferences-heading">
-        <h2 id="more-preferences-heading" className="more-group-title">Preferences</h2>
         <button type="button" className="more-row" onClick={onOpenCurrency}>
           <span>Currency</span>
-          <span className="more-row-trailing">
-            <span className="more-row-value">{preferences?.currency || 'PKR'}</span>
-            <ChevronRight className="more-chevron" size={20} />
-          </span>
+          <ChevronRight className="more-chevron" size={20} />
         </button>
-        <button type="button" className="more-row" onClick={onOpenPreferences}>
+        <button type="button" className="more-row" onClick={onOpenAppearance}>
+          <span>Appearance</span>
+          <ChevronRight className="more-chevron" size={20} />
+        </button>
+        <button type="button" className="more-row" onClick={onOpenDateFormat || onOpenPreferences}>
           <span>Date Format</span>
-          <span className="more-row-trailing">
-            <span className="more-row-value">{preferences?.dateFormat || 'DD MMM YYYY'}</span>
-            <ChevronRight className="more-chevron" size={20} />
-          </span>
+          <ChevronRight className="more-chevron" size={20} />
         </button>
-        <button type="button" className="more-row" onClick={onOpenPreferences}>
+        <button type="button" className="more-row" onClick={onOpenNotifications || onOpenPreferences}>
           <span>Notifications</span>
-          <span className="more-row-trailing">
-            <span className="more-row-value">{preferences?.notificationsEnabled ? 'Basic · On' : 'Basic · Off'}</span>
-            <ChevronRight className="more-chevron" size={20} />
-          </span>
+          <ChevronRight className="more-chevron" size={20} />
         </button>
-      </section>
-
-      <section className="more-group" aria-labelledby="more-help-heading">
-        <h2 id="more-help-heading" className="more-group-title">Help &amp; Info</h2>
         <button type="button" className="more-row" onClick={onOpenAbout}>
           <span>About</span>
           <ChevronRight className="more-chevron" size={20} />
@@ -91,6 +74,10 @@ export function MoreScreen({
           <ChevronRight className="more-chevron" size={20} />
         </button>
       </section>
+
+      {status?.message ? (
+        <StatusMessage type={status.type} message={status.message} />
+      ) : null}
     </div>
   );
 }
