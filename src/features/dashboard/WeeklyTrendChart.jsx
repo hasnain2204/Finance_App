@@ -79,8 +79,8 @@ export function WeeklyTrendChart({ weeklySpending, dateFormat }) {
         })}
       </svg>
       <div className="weekly-chart-legend" aria-label="Chart legend">
-        <span><i className="weekly-legend-dot expense-dot" />Overall expenses</span>
-        <span><i className="weekly-legend-dot budget-dot" />{hasBudget ? 'Remaining budget' : 'Budget not set'}</span>
+        <span><i className="weekly-legend-dot expense-dot" />Expenses</span>
+        <span><i className="weekly-legend-dot budget-dot" />{hasBudget ? 'Budget' : 'Budget not set'}</span>
       </div>
     </>
   );

@@ -24,11 +24,11 @@ export class ErrorBoundary extends Component {
       return (
         <main className="loading-shell" role="alert" aria-live="assertive">
           <section className="panel" style={{ textAlign: 'center', padding: '2rem 1.5rem', marginTop: '3rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem', color: '#d02222' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem', color: 'var(--color-expense, #b3261e)' }}>
               <CircleAlert size={48} />
             </div>
             <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Something went wrong</h2>
-            <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+            <p style={{ color: 'var(--color-text-muted, #63726a)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
               An unexpected error occurred while loading this view. Your local data remains safe.
             </p>
             <button

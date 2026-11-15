@@ -63,10 +63,10 @@ export function HomeScreen({
 
       <Panel className="home-chart-card">
         <PanelHeader>
-          <h2>Weekly expenses &amp; remaining budget</h2>
+          <h2>Weekly Analysis</h2>
         </PanelHeader>
         <WeeklyTrendChart weeklySpending={weeklySpending} dateFormat={preferences?.dateFormat} />
-        <p className="chart-footer">Bars show each day’s expenses; lines show cumulative expenses and remaining budget (PKR)</p>
+        {/* <p className="chart-footer">Bars show each day’s expenses; lines show cumulative expenses and remaining budget (PKR)</p> */}
       </Panel>
 
       <Panel className="home-recent-card">

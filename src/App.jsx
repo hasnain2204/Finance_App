@@ -265,7 +265,7 @@ function AppContent({ app, activateCloudRuntime }) {
     return (
       <ExportDataScreen
         status={status}
-        onExport={app.handleExport}
+        onExportPdf={app.handleExportPdf}
         onBack={() => setTab('more')}
       />
     );

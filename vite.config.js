@@ -12,8 +12,8 @@ export default defineConfig({
         name: 'PWS V1',
         short_name: 'PWS',
         description: 'Personal finance and expense tracking app',
-        theme_color: '#2563EB',
-        background_color: '#F8FAFC',
+        theme_color: '#17634f',
+        background_color: '#f5f8f6',
         display: 'standalone',
         start_url: '/',
         icons: [

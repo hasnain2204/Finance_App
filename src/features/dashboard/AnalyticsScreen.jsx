@@ -37,7 +37,7 @@ export function AnalyticsScreen({
   );
   const monthLabel = (date) => date.toLocaleDateString('en-PK', { month: 'short' });
   const highestTrendAmount = Math.max(1, ...monthlyExpenseTrend.map((month) => month.amount));
-  const categoryColors = ['#2f66f6', '#d02222', '#30a316', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b'];
+  const categoryColors = ['#17634f', '#d02222', '#30a316', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#63726a'];
   const categoryTotal = categoryTotals.reduce((total, [, amount]) => total + amount, 0);
   let categoryGradientStart = 0;
   const categoryGradient = categoryTotals.length
@@ -46,7 +46,7 @@ export function AnalyticsScreen({
         categoryGradientStart += categoryTotal ? (amount / categoryTotal) * 100 : 0;
         return `${categoryColors[index % categoryColors.length]} ${start}% ${categoryGradientStart}%`;
       }).join(', ')
-    : '#e8edf5 0% 100%';
+    : '#e8efeb 0% 100%';
 
   const chartWidth = 360;
   const chartHeight = 190;

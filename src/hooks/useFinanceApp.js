@@ -566,7 +566,11 @@ export function useFinanceApp(repository = financeRepository) {
     }
   };
 
+  // JSON Backup Export (Currently disabled / inactive in UI in favor of PDF Statement)
+  // Preserved for backend migration or future data recovery if needed.
   const handleExport = async () => {
+    // Disabled in UI
+    /*
     try {
       const payload = await repository.exportBackupPayload();
       const blob = new Blob([payload], { type: 'application/json' });
@@ -579,6 +583,25 @@ export function useFinanceApp(repository = financeRepository) {
       setStatus({ type: 'success', message: 'Backup exported' });
     } catch (error) {
       setStatus({ type: 'error', message: 'Could not export your backup. Please try again.' });
+    }
+    */
+  };
+
+  const handleExportPdf = async () => {
+    try {
+      const { exportFinancialReportPdf } = await import('../services/pdfExport');
+      exportFinancialReportPdf({
+        transactions,
+        budgets,
+        totalBudgetPaisa,
+        categoryMap,
+        paymentMap,
+        preferences
+      });
+      setStatus({ type: 'success', message: 'PDF statement exported successfully.' });
+    } catch (error) {
+      console.error('Failed to export PDF:', error);
+      setStatus({ type: 'error', message: 'Could not export your PDF statement. Please try again.' });
     }
   };
 
@@ -755,6 +778,7 @@ export function useFinanceApp(repository = financeRepository) {
     setPreferenceSaveStatus,
     handleSavePreferences,
     handleExport,
+    handleExportPdf,
     fileInputRef,
     restoreCandidate,
     setRestoreCandidate,
