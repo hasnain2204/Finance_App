@@ -82,7 +82,13 @@ describe('Supabase authentication session handling', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(getActiveAuthUserSnapshot()).toBeNull();
     await act(async () => result.current.signUp(' user@example.com ', 'a-secure-password'));
-    expect(client.auth.signUp).toHaveBeenCalledWith({ email: 'user@example.com', password: 'a-secure-password' });
+    expect(client.auth.signUp).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      password: 'a-secure-password',
+      options: {
+        emailRedirectTo: window.location.origin
+      }
+    });
     expect(result.current.message).toContain('Check user@example.com');
 
     await act(async () => result.current.signIn('user@example.com', 'a-secure-password'));

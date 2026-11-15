@@ -14,7 +14,7 @@ export function WeeklyTrendChart({ weeklySpending, dateFormat }) {
   const minValue = Math.min(0, ...values);
   const maxValue = Math.max(1, ...values);
   const valueRange = maxValue - minValue || 1;
-  const xForIndex = (index) => plotLeft + (plotWidth * index) / (weeklySpending.length - 1);
+  const xForIndex = (index) => plotLeft + (plotWidth * index) / Math.max(1, weeklySpending.length - 1);
   const yForValue = (value) => plotBottom - ((value - minValue) / valueRange) * plotHeight;
   const expensesPoints = weeklySpending.map((day, index) => (
     `${xForIndex(index)},${yForValue(day.totalExpenses)}`
