@@ -1,5 +1,4 @@
-import { WalletCards } from 'lucide-react';
-import { BackHeader } from '../../components/ui';
+import { AppLogo, BackHeader } from '../../components/ui';
 
 export function AboutScreen({ onBack }) {
   return (
@@ -8,7 +7,7 @@ export function AboutScreen({ onBack }) {
 
       <section className="about-content">
         <article className="about-intro-card">
-          <WalletCards className="about-brand-icon" size={24} aria-hidden="true" />
+          <AppLogo size={52} className="about-brand-icon" />
           <h2>PWS V1.2</h2>
           <p className="about-tagline">Manage your money simply.</p>
           <p className="about-description">A simple personal finance tool for students and users in Pakistan.</p>

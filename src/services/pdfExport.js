@@ -186,7 +186,7 @@ export function exportFinancialReportPdf({
 
   // --- 4. Transaction Ledger Table ---
   const sortedTransactions = [...transactions].sort(
-    (a, b) => new Date(b.date) - new Date(a.date)
+    (a, b) => (b.date || '').localeCompare(a.date || '')
   );
 
   const transactionRows = sortedTransactions.map((tx) => [

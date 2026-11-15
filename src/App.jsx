@@ -361,6 +361,10 @@ function AppContent({ app, activateCloudRuntime }) {
             monthlyBudgetTrend={app.monthlyBudgetTrend}
             categoryTotals={app.categoryTotals}
             paymentMethodTotals={app.paymentMethodTotals}
+            categoryMap={app.categoryMap}
+            paymentMap={app.paymentMap}
+            dateFormat={preferences?.dateFormat}
+            onOpenTransaction={app.openTransactionDetail}
             budgetAnalysisRef={app.budgetAnalysisRef}
           />
         )}

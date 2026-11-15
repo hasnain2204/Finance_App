@@ -17,7 +17,13 @@ import {
   buildWeeklyBudgetTrend,
   getLocalDateString,
   formatDate,
-  validateTransaction
+  validateTransaction,
+  filterTransactionsByRange,
+  calculateSpendingVelocity,
+  calculateWeekdayWeekendSplit,
+  calculateCategorySurge,
+  calculateFinancialHealthScore,
+  calculateAnalyticsOverview
 } from './finance';
 
 const completeBackupData = () => ({
@@ -491,5 +497,121 @@ describe('finance utilities', () => {
   it('rejects amounts that cannot be stored accurately in paisa', () => {
     expect(validateTransaction({ amount: '0.001', date: '2026-10-24' }).isValid).toBe(false);
     expect(validateTransaction({ amount: '10', date: '2026-10-24' }).isValid).toBe(true);
+  });
+
+  describe('V2 Analytics Engines', () => {
+    const mockTxs = [
+      { id: 1, type: 'expense', amount: 1000, date: '2026-11-10', categoryId: 'cat-food' },
+      { id: 2, type: 'expense', amount: 2000, date: '2026-11-14', categoryId: 'cat-transport' }, // Saturday
+      { id: 3, type: 'expense', amount: 1500, date: '2026-10-15', categoryId: 'cat-food' },
+      { id: 4, type: 'expense', amount: 500, date: '2026-09-05', categoryId: 'cat-bills' }
+    ];
+
+    it('filters transactions accurately by time range preset', () => {
+      const ref = new Date('2026-11-15T12:00:00Z');
+      expect(filterTransactionsByRange(mockTxs, 'this-month', ref)).toHaveLength(2);
+      expect(filterTransactionsByRange(mockTxs, 'last-month', ref)).toHaveLength(1);
+      expect(filterTransactionsByRange(mockTxs, '3-months', ref)).toHaveLength(4);
+      expect(filterTransactionsByRange(mockTxs, 'all-time', ref)).toHaveLength(4);
+    });
+
+    it('calculates spending velocity, safe daily limit and month-end projection correctly', () => {
+      const ref = new Date('2026-11-15T12:00:00Z'); // Day 15 of 30 days
+      const result = calculateSpendingVelocity({
+        transactions: mockTxs,
+        monthlyExpense: 3000,
+        overallBudget: 5000,
+        referenceDate: ref
+      });
+
+      expect(result.daysElapsed).toBe(15);
+      expect(result.daysRemaining).toBe(15);
+      expect(result.dailyAverage).toBe(200);
+      expect(result.projectedTotal).toBe(6000); // 3000 + 200*15 = 6000
+      expect(result.safeDailyLimit).toBeCloseTo(133.33, 1); // (5000 - 3000) / 15
+      expect(result.status).toBe('warning'); // 6000 exceeds 5000 budget
+      expect(result.label).toBe('Pacing High');
+    });
+
+    it('applies early month pace smoothing on days 1-3', () => {
+      const ref = new Date('2026-11-02T12:00:00Z'); // Day 2 of 30 days
+      const result = calculateSpendingVelocity({
+        transactions: mockTxs,
+        monthlyExpense: 1000,
+        overallBudget: 5000,
+        referenceDate: ref
+      });
+
+      expect(result.daysElapsed).toBe(2);
+      expect(result.daysRemaining).toBe(28);
+      expect(result.dailyAverage).toBe(500); // 1000 / 2
+      expect(result.projectedTotal).toBe(15000); // 1000 + 500*28
+      expect(result.status).toBe('warning');
+      expect(result.message).toContain('Early pace high');
+      expect(result.safeDailyLimit).toBeCloseTo(142.85, 1); // (5000 - 1000) / 28
+    });
+
+    it('computes weekday vs weekend spending split and identifies peak spending day', () => {
+      const result = calculateWeekdayWeekendSplit(mockTxs);
+      expect(result.grandTotal).toBe(5000);
+      expect(result.weekendTotal).toBe(2500); // 2026-11-14 (Sat) + 2026-09-05 (Sat)
+      expect(result.weekdayTotal).toBe(2500);
+      expect(result.weekendPercent).toBe(50);
+      expect(result.weekdayPercent).toBe(50);
+      expect(result.peakDay).not.toBeNull();
+      expect(result.peakDay?.name).toBe('Saturday');
+      expect(result.peakDay?.amount).toBe(2500);
+    });
+
+    it('identifies category spending surges and detects newly active categories', () => {
+      const surge = calculateCategorySurge(
+        mockTxs,
+        '2026-11',
+        '2026-10',
+        { 'cat-food': { name: 'Food' }, 'cat-transport': { name: 'Transport' } }
+      );
+      // Transport had 0 in Oct and 2000 in Nov
+      expect(surge).not.toBeNull();
+      expect(surge?.categoryName).toBe('Transport');
+      expect(surge?.diffAmount).toBe(2000);
+      expect(surge?.isNew).toBe(true);
+    });
+
+    it('calculates financial health score and handles unconfigured budgets cleanly', () => {
+      const goodScore = calculateFinancialHealthScore({
+        totalSpent: 1000,
+        overallBudget: 5000,
+        daysElapsed: 15,
+        daysInMonth: 30
+      });
+      expect(goodScore.score).toBeGreaterThanOrEqual(80);
+      expect(['Good', 'Excellent']).toContain(goodScore.rating);
+
+      const overBudgetScore = calculateFinancialHealthScore({
+        totalSpent: 6000,
+        overallBudget: 5000,
+        daysElapsed: 15,
+        daysInMonth: 30
+      });
+      expect(overBudgetScore.score).toBeLessThanOrEqual(50);
+      expect(overBudgetScore.rating).toBe('Attention Needed');
+
+      const noBudgetScore = calculateFinancialHealthScore({
+        totalSpent: 3000,
+        overallBudget: null
+      });
+      expect(noBudgetScore.score).toBeNull();
+      expect(noBudgetScore.rating).toBe('No Budget Set');
+    });
+
+    it('runs single-pass aggregation via calculateAnalyticsOverview', () => {
+      const overview = calculateAnalyticsOverview(mockTxs, {
+        currentMonth: '2026-11'
+      });
+      expect(overview.totalExpense).toBe(5000);
+      expect(overview.currentMonthExpense).toBe(3000);
+      expect(overview.categoryTotals['cat-food']).toBe(1000);
+      expect(overview.categoryTotals['cat-transport']).toBe(2000);
+    });
   });
 });

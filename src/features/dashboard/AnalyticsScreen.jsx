@@ -1,52 +1,159 @@
-import { TrendingUp } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import {
+  Activity,
+  ArrowRight,
+  Calendar,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  X,
+  Zap
+} from 'lucide-react';
+import {
+  calculateCategorySurge,
   calculateExpenseTotal,
+  calculateFinancialHealthScore,
+  calculateSpendingVelocity,
+  calculateWeekdayWeekendSplit,
+  filterTransactionsByRange,
   formatCurrency,
+  formatDate,
   fromPaisa,
   getLocalDateString
 } from '../../lib/finance';
-import { Panel, PanelHeader, EmptyState } from '../../components/ui';
+import { EmptyState, Panel, PanelHeader } from '../../components/ui';
 
 export function AnalyticsScreen({
-  transactions,
-  totalBudgetPaisa,
-  monthlyExpense,
-  monthlyExpenseTrend,
-  monthlyBudgetTrend,
-  categoryTotals,
-  paymentMethodTotals,
+  transactions = [],
+  totalBudgetPaisa = 0,
+  monthlyExpense = 0,
+  monthlyExpenseTrend = [],
+  monthlyBudgetTrend = [],
+  categoryTotals = [],
+  paymentMethodTotals = [],
+  categoryMap = {},
+  paymentMap = {},
+  dateFormat = 'DD MMM YYYY',
+  onOpenTransaction,
   budgetAnalysisRef
 }) {
+  const [timeRange, setTimeRange] = useState('this-month');
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+
   const overallBudget = fromPaisa(totalBudgetPaisa);
-  const totalSpent = calculateExpenseTotal(transactions);
-  const remainingBalance = overallBudget - totalSpent;
-  const spendingPercent = overallBudget > 0 ? (totalSpent / overallBudget) * 100 : 0;
-  const currentDate = new Date();
-  const currentMonth = getLocalDateString(currentDate).slice(0, 7);
-  const previousMonthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
-  const previousMonth = getLocalDateString(previousMonthDate).slice(0, 7);
-  const previousMonthExpense = calculateExpenseTotal(transactions, previousMonth);
-  const monthChange = previousMonthExpense > 0
-    ? ((monthlyExpense - previousMonthExpense) / previousMonthExpense) * 100
-    : null;
-  const currentMonthTransactions = transactions.filter((transaction) => transaction.date?.startsWith(currentMonth));
-  const averageDailyExpense = monthlyExpense / Math.max(1, currentDate.getDate());
-  const largestExpense = currentMonthTransactions.reduce(
-    (largest, transaction) => Math.max(largest, Number(transaction.amount || 0)),
-    0
-  );
-  const monthLabel = (date) => date.toLocaleDateString('en-PK', { month: 'short' });
-  const highestTrendAmount = Math.max(1, ...monthlyExpenseTrend.map((month) => month.amount));
+  const currentDate = useMemo(() => new Date(), []);
+  const currentMonth = useMemo(() => getLocalDateString(currentDate).slice(0, 7), [currentDate]);
+  const previousMonthDate = useMemo(() => new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1), [currentDate]);
+  const previousMonth = useMemo(() => getLocalDateString(previousMonthDate).slice(0, 7), [previousMonthDate]);
+
+  // 1. Time Range Filtering
+  const filteredTransactions = useMemo(() => {
+    return filterTransactionsByRange(transactions, timeRange, currentDate);
+  }, [transactions, timeRange, currentDate]);
+
+  const totalSpentInRange = useMemo(() => {
+    return filteredTransactions
+      .filter((tx) => tx.type === 'expense')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  }, [filteredTransactions]);
+
+  // Dynamic Category Totals for active time range
+  const dynamicCategoryTotals = useMemo(() => {
+    const totals = {};
+    for (const tx of filteredTransactions) {
+      if (tx.type !== 'expense') continue;
+      const id = tx.categoryId || 'cat-other';
+      totals[id] = (totals[id] || 0) + Number(tx.amount || 0);
+    }
+    return Object.entries(totals)
+      .map(([id, amount]) => ({
+        id,
+        label: categoryMap[id]?.name || 'Other',
+        amount
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [filteredTransactions, categoryMap]);
+
+  // Dynamic Payment Method Totals for active time range
+  const dynamicPaymentTotals = useMemo(() => {
+    const totals = {};
+    for (const tx of filteredTransactions) {
+      if (tx.type !== 'expense') continue;
+      const id = tx.paymentMethodId || 'pm-other';
+      totals[id] = (totals[id] || 0) + Number(tx.amount || 0);
+    }
+    return Object.entries(totals)
+      .map(([id, amount]) => ({
+        id,
+        label: paymentMap[id]?.name || 'Other',
+        amount
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [filteredTransactions, paymentMap]);
+
+  // 2. Spending Velocity & Month-End Run-Rate (Current Month)
+  const velocity = useMemo(() => {
+    return calculateSpendingVelocity({
+      transactions,
+      monthlyExpense,
+      overallBudget,
+      referenceDate: currentDate
+    });
+  }, [transactions, monthlyExpense, overallBudget, currentDate]);
+
+  // 3. Financial Health Score (0-100)
+  const healthScore = useMemo(() => {
+    return calculateFinancialHealthScore({
+      totalSpent: monthlyExpense,
+      overallBudget,
+      daysElapsed: velocity.daysElapsed,
+      daysInMonth: velocity.daysInMonth
+    });
+  }, [monthlyExpense, overallBudget, velocity]);
+
+  // 4. Weekday vs Weekend Spending Split
+  const weekdayWeekend = useMemo(() => {
+    return calculateWeekdayWeekendSplit(filteredTransactions);
+  }, [filteredTransactions]);
+
+  // 5. Category Surge / Drift Detector
+  const categorySurge = useMemo(() => {
+    return calculateCategorySurge(transactions, currentMonth, previousMonth, categoryMap);
+  }, [transactions, currentMonth, previousMonth, categoryMap]);
+
+  // Selected Category Transactions for Drill-Down
+  const selectedCategoryTransactions = useMemo(() => {
+    if (!selectedCategoryId) return [];
+    return filteredTransactions.filter((tx) => tx.categoryId === selectedCategoryId);
+  }, [filteredTransactions, selectedCategoryId]);
+
+  const selectedCategoryData = useMemo(() => {
+    if (!selectedCategoryId) return null;
+    const cat = dynamicCategoryTotals.find((c) => c.id === selectedCategoryId);
+    return cat || { id: selectedCategoryId, label: categoryMap[selectedCategoryId]?.name || 'Category', amount: 0 };
+  }, [dynamicCategoryTotals, selectedCategoryId, categoryMap]);
+
+  // Donut Gradient Configuration
   const categoryColors = ['#17634f', '#d02222', '#30a316', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#63726a'];
-  const categoryTotal = categoryTotals.reduce((total, [, amount]) => total + amount, 0);
   let categoryGradientStart = 0;
-  const categoryGradient = categoryTotals.length
-    ? categoryTotals.map(([, amount], index) => {
+  const categoryGradient = dynamicCategoryTotals.length
+    ? dynamicCategoryTotals.map((item, index) => {
         const start = categoryGradientStart;
-        categoryGradientStart += categoryTotal ? (amount / categoryTotal) * 100 : 0;
+        categoryGradientStart += totalSpentInRange ? (item.amount / totalSpentInRange) * 100 : 0;
         return `${categoryColors[index % categoryColors.length]} ${start}% ${categoryGradientStart}%`;
       }).join(', ')
     : '#e8efeb 0% 100%';
+
+  const timeRangeOptions = [
+    { key: 'this-month', label: 'This Month' },
+    { key: 'last-month', label: 'Last Month' },
+    { key: '3-months', label: 'Last 3M' },
+    { key: '6-months', label: 'Last 6M' },
+    { key: 'all-time', label: 'All Time' }
+  ];
 
   const chartWidth = 360;
   const chartHeight = 190;
@@ -60,7 +167,7 @@ export function AnalyticsScreen({
     1,
     ...monthlyBudgetTrend.map((month) => Math.max(month.amount, month.budget || 0))
   );
-  const xForIndex = (index) => left + ((right - left) * index) / (monthlyBudgetTrend.length - 1);
+  const xForIndex = (index) => left + ((right - left) * index) / Math.max(1, monthlyBudgetTrend.length - 1);
   const yForValue = (value) => bottom - (value / maxValue) * plotHeight;
   const budgetPoints = monthlyBudgetTrend
     .filter((month) => month.budget !== null)
@@ -72,50 +179,339 @@ export function AnalyticsScreen({
     ? budgetPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point}`).join(' ')
     : '';
 
+  const monthLabel = (date) => date.toLocaleDateString('en-PK', { month: 'short' });
+  const highestTrendAmount = Math.max(1, ...monthlyExpenseTrend.map((m) => m.amount));
+
   return (
-    <div className="stacked-blocks">
+    <div className="stacked-blocks analytics-v2">
+      {/* 1. Time Range Selector Bar */}
+      <section className="analytics-range-selector" aria-label="Select time range">
+        {timeRangeOptions.map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            className={`range-pill ${timeRange === opt.key ? 'active' : ''}`}
+            onClick={() => {
+              setTimeRange(opt.key);
+              setSelectedCategoryId(null);
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </section>
+
+      {/* 2. Executive Health & Spending Velocity Card */}
       <Panel className="analytics-overview">
         <PanelHeader>
           <div>
-            <p className="eyebrow">Your finances</p>
-            <h2>Spending overview</h2>
+            <p className="eyebrow">Financial Velocity</p>
+            <h2>Pace &amp; Projections</h2>
           </div>
-          <TrendingUp size={18} />
+          <div className="analytics-health-badge" title="Budget Adherence Rating">
+            <span className="health-score">{healthScore.score !== null ? healthScore.score : '—'}</span>
+            <span className="health-label">{healthScore.rating}</span>
+          </div>
         </PanelHeader>
 
-        <div className="metric-grid analytics-metric-grid">
-          <div className="metric-card">
-            <span>Expenses this month</span>
-            <strong>{formatCurrency(monthlyExpense)}</strong>
+        <div className="velocity-summary-grid">
+          <div className="velocity-metric-item">
+            <span className="velocity-label">
+              <Zap size={14} className="velocity-icon" /> Daily Run-Rate
+            </span>
+            <strong className="velocity-value">{formatCurrency(velocity.dailyAverage)}</strong>
+            <small className="velocity-sub">Pace per day ({velocity.daysElapsed} days in)</small>
           </div>
-          <div className="metric-card">
-            <span>Transactions this month</span>
-            <strong>{currentMonthTransactions.length}</strong>
+
+          <div className="velocity-metric-item">
+            <span className="velocity-label">
+              <Clock size={14} className="velocity-icon" /> Est. Month-End
+            </span>
+            <strong className={`velocity-value ${velocity.status === 'danger' ? 'danger' : ''}`}>
+              {formatCurrency(velocity.projectedTotal)}
+            </strong>
+            <small className="velocity-sub">{velocity.message}</small>
           </div>
-          <div className="metric-card">
-            <span>Average per day</span>
-            <strong>{formatCurrency(averageDailyExpense)}</strong>
-          </div>
-          <div className="metric-card">
-            <span>Largest expense this month</span>
-            <strong>{formatCurrency(largestExpense)}</strong>
-          </div>
+
+          {velocity.safeDailyLimit !== null && velocity.safeDailyLimit > 0 ? (
+            <div className="velocity-metric-item">
+              <span className="velocity-label">
+                <CheckCircle2 size={14} className="velocity-icon" /> Safe Daily Limit
+              </span>
+              <strong className="velocity-value">{formatCurrency(velocity.safeDailyLimit)}</strong>
+              <small className="velocity-sub">Remaining daily allowance</small>
+            </div>
+          ) : null}
         </div>
 
-        <p className={`analytics-comparison${monthChange === null || monthChange === 0 ? '' : monthChange > 0 ? ' increase' : ' decrease'}`}>
-          {monthChange === null
-            ? `Previous month: ${formatCurrency(previousMonthExpense)} · not enough data to compare`
-            : monthChange === 0
-              ? 'Spending is unchanged from last month'
-            : `${Math.abs(monthChange).toFixed(1)}% ${monthChange > 0 ? 'more' : 'less'} than last month`}
-        </p>
+        {overallBudget > 0 ? (
+          <div className="velocity-timeline-bar" aria-label="Month progress and budget burn">
+            <div className="timeline-labels">
+              <span>Day {velocity.daysElapsed} of {velocity.daysInMonth}</span>
+              <span className={`status-pill ${velocity.status}`}>{velocity.label}</span>
+            </div>
+            <div className="timeline-track">
+              <div
+                className={`timeline-fill ${velocity.status}`}
+                style={{ width: `${Math.min(100, Math.round((velocity.dailyAverage * velocity.daysElapsed / overallBudget) * 100))}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
       </Panel>
 
+      {/* 3. Category Surge Alert (Anomaly Detection) */}
+      {categorySurge ? (
+        <article className="surge-alert-card" aria-label="Category surge alert">
+          <div className="surge-icon-wrap">
+            <Sparkles size={18} />
+          </div>
+          <div className="surge-copy">
+            <strong>{categorySurge.isNew ? `New Spending in ${categorySurge.categoryName}` : `Spending Surge in ${categorySurge.categoryName}`}</strong>
+            <p>
+              {categorySurge.isNew
+                ? `First-time activity with ${formatCurrency(categorySurge.currentAmount)} logged this month.`
+                : `Increased by ${Math.round(categorySurge.percentChange)}% (+${formatCurrency(categorySurge.diffAmount)}) compared to last month.`}
+            </p>
+          </div>
+        </article>
+      ) : null}
+
+      {/* 4. Category Breakdown & Interactive Drill-Down */}
+      <Panel className="analytics-section">
+        <PanelHeader>
+          <div>
+            <p className="eyebrow">Category Analytics</p>
+            <h2>Spending by Category</h2>
+          </div>
+          <span className="range-indicator">{timeRangeOptions.find((o) => o.key === timeRange)?.label}</span>
+        </PanelHeader>
+
+        <div className="analytics-donut-layout">
+          {dynamicCategoryTotals.length === 0 ? (
+            <EmptyState>No expense data recorded in this time range.</EmptyState>
+          ) : (
+            <>
+              <div
+                className="analytics-donut"
+                role="img"
+                aria-label={`Category spending breakdown totaling ${formatCurrency(totalSpentInRange)}`}
+                style={{ background: `conic-gradient(${categoryGradient})` }}
+              >
+                <span>
+                  <small>Total spent</small>
+                  <strong>{formatCurrency(totalSpentInRange)}</strong>
+                </span>
+              </div>
+              <div className="analytics-donut-legend">
+                {dynamicCategoryTotals.map((item, index) => {
+                  const share = totalSpentInRange > 0 ? (item.amount / totalSpentInRange) * 100 : 0;
+                  const isSelected = selectedCategoryId === item.id;
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className={`analytics-donut-item clickable ${isSelected ? 'active' : ''}`}
+                      onClick={() => setSelectedCategoryId(isSelected ? null : item.id)}
+                      title={`Click to inspect ${item.label}`}
+                    >
+                      <i style={{ background: categoryColors[index % categoryColors.length] }} />
+                      <span>{item.label}</span>
+                      <strong>{share.toFixed(1)}%</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Category Drill-Down Inspection View */}
+        {selectedCategoryData ? (
+          <section className="category-drilldown-panel" aria-label={`Filtered ledger for ${selectedCategoryData.label}`}>
+            <div className="drilldown-header">
+              <div>
+                <p className="eyebrow">Category Drill-Down</p>
+                <h3>{selectedCategoryData.label}</h3>
+              </div>
+              <button
+                type="button"
+                className="drilldown-close"
+                onClick={() => setSelectedCategoryId(null)}
+                aria-label="Clear filter"
+              >
+                <X size={16} /> Clear filter
+              </button>
+            </div>
+            <div className="drilldown-metrics">
+              <div>
+                <span>Total Spent</span>
+                <strong>{formatCurrency(selectedCategoryData.amount)}</strong>
+              </div>
+              <div>
+                <span>Transactions</span>
+                <strong>{selectedCategoryTransactions.length}</strong>
+              </div>
+              <div>
+                <span>Share of Total</span>
+                <strong>
+                  {totalSpentInRange > 0 ? ((selectedCategoryData.amount / totalSpentInRange) * 100).toFixed(1) : 0}%
+                </strong>
+              </div>
+            </div>
+
+            <div className="drilldown-transactions-list">
+              {selectedCategoryTransactions.slice(0, 5).map((tx) => (
+                <div
+                  key={tx.id}
+                  className="drilldown-tx-row"
+                  onClick={() => onOpenTransaction && onOpenTransaction(tx)}
+                  role={onOpenTransaction ? 'button' : undefined}
+                >
+                  <div className="tx-copy">
+                    <strong>{tx.title || 'Expense'}</strong>
+                    <small>{formatDate(tx.date, dateFormat)} · {paymentMap[tx.paymentMethodId]?.name || 'Cash'}</small>
+                  </div>
+                  <strong className="tx-amount">{formatCurrency(tx.amount)}</strong>
+                </div>
+              ))}
+            </div>
+            {selectedCategoryTransactions.length > 5 ? (
+              <p className="drilldown-more-notice">
+                Showing recent 5 of {selectedCategoryTransactions.length} transactions in this period.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+      </Panel>
+
+      {/* 5. Weekday vs Weekend Spending Habits */}
+      <Panel className="analytics-section">
+        <PanelHeader>
+          <div>
+            <p className="eyebrow">Behavioral Insights</p>
+            <h2>Weekday vs. Weekend Habits</h2>
+          </div>
+        </PanelHeader>
+
+        <div className="habit-split-container">
+          {weekdayWeekend.peakDay ? (
+            <div className="habit-peak-badge">
+              <Sparkles size={13} className="peak-icon" />
+              <span>
+                Peak spending day: <strong>{weekdayWeekend.peakDay.name}</strong> ({formatCurrency(weekdayWeekend.peakDay.amount)})
+              </span>
+            </div>
+          ) : null}
+
+          <div className="habit-split-bar" aria-label="Weekday to Weekend ratio">
+            <div
+              className="habit-weekday-fill"
+              style={{ width: `${Math.round(weekdayWeekend.weekdayPercent)}%` }}
+              title={`Weekdays: ${Math.round(weekdayWeekend.weekdayPercent)}%`}
+            />
+            <div
+              className="habit-weekend-fill"
+              style={{ width: `${Math.round(weekdayWeekend.weekendPercent)}%` }}
+              title={`Weekends: ${Math.round(weekdayWeekend.weekendPercent)}%`}
+            />
+          </div>
+
+          <div className="habit-metrics-grid">
+            <div className="habit-metric-box weekday">
+              <span className="dot weekday-dot" />
+              <div>
+                <span>Weekdays (Mon–Fri)</span>
+                <strong>{formatCurrency(weekdayWeekend.weekdayTotal)}</strong>
+                <small>{weekdayWeekend.weekdayCount} transactions ({Math.round(weekdayWeekend.weekdayPercent)}%)</small>
+              </div>
+            </div>
+            <div className="habit-metric-box weekend">
+              <span className="dot weekend-dot" />
+              <div>
+                <span>Weekends (Sat–Sun)</span>
+                <strong>{formatCurrency(weekdayWeekend.weekendTotal)}</strong>
+                <small>{weekdayWeekend.weekendCount} transactions ({Math.round(weekdayWeekend.weekendPercent)}%)</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Panel>
+
+      {/* 6. Spending by Payment Method */}
+      <Panel className="analytics-section">
+        <PanelHeader>
+          <div>
+            <p className="eyebrow">Payment Channels</p>
+            <h2>Spending by Method</h2>
+          </div>
+        </PanelHeader>
+        <div className="category-list">
+          {dynamicPaymentTotals.length === 0 ? (
+            <EmptyState>No payment data recorded yet.</EmptyState>
+          ) : (
+            dynamicPaymentTotals.map(({ label, amount }) => (
+              <div key={label} className="category-row">
+                <span>{label}</span>
+                <strong>{formatCurrency(amount)}</strong>
+              </div>
+            ))
+          )}
+        </div>
+      </Panel>
+
+      {/* 7. Budget Performance & Monthly Trend */}
+      <Panel ref={budgetAnalysisRef} className="budget-analytics-panel">
+        <PanelHeader>
+          <div>
+            <p className="eyebrow">Budget</p>
+            <h2>Budget Performance</h2>
+          </div>
+        </PanelHeader>
+        {overallBudget > 0 ? (
+          <section className="budget-overall-summary">
+            <div className="budget-summary">
+              <div className="budget-summary-item">
+                <span>Total budget</span>
+                <strong>{formatCurrency(overallBudget)}</strong>
+              </div>
+              <div className="budget-summary-item">
+                <span>Total expenses</span>
+                <strong>{formatCurrency(monthlyExpense)}</strong>
+              </div>
+              <div className="budget-summary-item">
+                <span>{overallBudget - monthlyExpense < 0 ? 'Spent over budget' : 'Remaining budget'}</span>
+                <strong className={overallBudget - monthlyExpense < 0 ? 'expense' : 'budget-change-value'}>
+                  {formatCurrency(Math.abs(overallBudget - monthlyExpense))}
+                </strong>
+              </div>
+            </div>
+            <div
+              className={`budget-progress${overallBudget - monthlyExpense < 0 ? ' over-budget' : ''}`}
+              role="progressbar"
+              aria-label="Overall budget spent"
+              aria-valuemin="0"
+              aria-valuemax={overallBudget}
+              aria-valuenow={Math.min(monthlyExpense, overallBudget)}
+              aria-valuetext={`${Math.round((monthlyExpense / overallBudget) * 100)}% used`}
+            >
+              <span style={{ width: `${Math.min((monthlyExpense / overallBudget) * 100, 100)}%` }} />
+            </div>
+            <p className="analytics-footnote">
+              {Math.round((monthlyExpense / overallBudget) * 100)}% of your monthly budget has been used.
+            </p>
+          </section>
+        ) : (
+          <EmptyState>Add a budget in the Budget tab to see performance tracking here.</EmptyState>
+        )}
+      </Panel>
+
+      {/* 8. Six-Month Trend Chart */}
       <Panel className="analytics-section">
         <PanelHeader>
           <div>
             <p className="eyebrow">Trend</p>
-            <h2>Monthly spending</h2>
+            <h2>6-Month Spending History</h2>
           </div>
         </PanelHeader>
         <div className="monthly-trend-chart" role="img" aria-label="Expense totals for the last six months">
@@ -136,165 +532,6 @@ export function AnalyticsScreen({
         </div>
         <p className="analytics-footnote">Expense totals by month · PKR</p>
       </Panel>
-
-      <Panel className="analytics-section">
-        <PanelHeader>
-          <div>
-            <p className="eyebrow">This month</p>
-            <h2>Spending by category</h2>
-          </div>
-        </PanelHeader>
-
-        <div className="analytics-donut-layout">
-          {categoryTotals.length === 0 ? (
-            <EmptyState>No expense data is available yet.</EmptyState>
-          ) : (
-            <>
-              <div
-                className="analytics-donut"
-                role="img"
-                aria-label={`Category spending breakdown totaling ${formatCurrency(categoryTotal)}`}
-                style={{ background: `conic-gradient(${categoryGradient})` }}
-              >
-                <span>
-                  <small>Total spent</small>
-                  <strong>{formatCurrency(categoryTotal)}</strong>
-                </span>
-              </div>
-              <div className="analytics-donut-legend">
-                {categoryTotals.map(([label, total], index) => {
-                  const share = categoryTotal > 0 ? (total / categoryTotal) * 100 : 0;
-                  return (
-                    <div className="analytics-donut-item" key={label}>
-                      <i style={{ background: categoryColors[index % categoryColors.length] }} />
-                      <span>{label}</span>
-                      <strong>{share.toFixed(1)}%</strong>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      </Panel>
-
-      <Panel className="analytics-section">
-        <PanelHeader>
-          <div>
-            <p className="eyebrow">This month</p>
-            <h2>Spending by payment method</h2>
-          </div>
-        </PanelHeader>
-        <div className="category-list">
-          {paymentMethodTotals.length === 0 ? (
-            <EmptyState>No expense data is available yet.</EmptyState>
-          ) : (
-            paymentMethodTotals.map(({ label, amount }) => (
-              <div key={label} className="category-row">
-                <span>{label}</span>
-                <strong>{formatCurrency(amount)}</strong>
-              </div>
-            ))
-          )}
-        </div>
-      </Panel>
-
-      <Panel ref={budgetAnalysisRef} className="budget-analytics-panel">
-        <PanelHeader>
-          <div>
-            <p className="eyebrow">Budget</p>
-            <h2>Budget performance</h2>
-          </div>
-        </PanelHeader>
-        {overallBudget > 0 ? (
-          <section className="budget-overall-summary">
-            <div className="budget-summary">
-              <div className="budget-summary-item">
-                <span>Total budget</span>
-                <strong>{formatCurrency(overallBudget)}</strong>
-              </div>
-              <div className="budget-summary-item">
-                <span>Total expenses</span>
-                <strong>{formatCurrency(totalSpent)}</strong>
-              </div>
-              <div className="budget-summary-item">
-                <span>{remainingBalance < 0 ? 'Spent over budget' : 'Remaining budget'}</span>
-                <strong className={remainingBalance < 0 ? 'expense' : 'budget-change-value'}>
-                  {formatCurrency(Math.abs(remainingBalance))}
-                </strong>
-              </div>
-            </div>
-            <div
-              className={`budget-progress${remainingBalance < 0 ? ' over-budget' : ''}`}
-              role="progressbar"
-              aria-label="Overall budget spent"
-              aria-valuemin="0"
-              aria-valuemax={overallBudget}
-              aria-valuenow={Math.min(totalSpent, overallBudget)}
-              aria-valuetext={`${Math.round(spendingPercent)}% used`}
-            >
-              <span style={{ width: `${Math.min(spendingPercent, 100)}%` }} />
-            </div>
-            <p className="analytics-footnote">{Math.round(spendingPercent)}% of your total budget has been used.</p>
-          </section>
-        ) : (
-          <EmptyState>Add a budget to see budget performance here.</EmptyState>
-        )}
-      </Panel>
-
-      <Panel className="analytics-section analytics-budget-analysis">
-        <PanelHeader>
-          <div>
-            <p className="eyebrow">Analysis</p>
-            <h2>Budget vs. spending</h2>
-          </div>
-        </PanelHeader>
-        <svg
-          className="monthly-analysis-chart"
-          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-          role="img"
-          aria-label="Monthly expense bars compared with available monthly budget"
-        >
-          {[0, 1, 2, 3].map((line) => {
-            const y = top + (plotHeight * line) / 3;
-            return <line key={line} className="chart-gridline" x1={left} x2={right} y1={y} y2={y} />;
-          })}
-          {monthlyBudgetTrend.map((month, index) => {
-            const x = xForIndex(index);
-            const expenseY = yForValue(month.amount);
-            return (
-              <g key={month.month}>
-                <rect
-                  className="analysis-expense-bar"
-                  x={x - 12}
-                  y={expenseY}
-                  width="24"
-                  height={Math.max(2, bottom - expenseY)}
-                  rx="4"
-                >
-                  <title>{`${month.month}: Expenses ${formatCurrency(month.amount)}`}</title>
-                </rect>
-                <text className="weekly-chart-date" x={x} y="172" textAnchor="middle">
-                  {monthLabel(month.date)}
-                </text>
-                {month.budget !== null ? (
-                  <circle className="analysis-budget-point" cx={x} cy={yForValue(month.budget)} r="3.5">
-                    <title>{`${month.month}: Budget ${formatCurrency(month.budget)}`}</title>
-                  </circle>
-                ) : null}
-              </g>
-            );
-          })}
-          {budgetLinePath ? <path className="analysis-budget-line" d={budgetLinePath} /> : null}
-        </svg>
-        <div className="weekly-chart-legend" aria-label="Chart legend">
-          <span><i className="weekly-legend-dot expense-dot" />Expenses</span>
-          <span><i className="weekly-legend-dot budget-dot" />{hasMonthlyBudget ? 'Monthly budget' : 'No monthly budget history'}</span>
-        </div>
-        <p className="analytics-footnote">Compare monthly expense totals with saved budgets and budget additions · PKR</p>
-      </Panel>
-
-      <p className="analytics-data-note">Income, cash-flow and savings-rate reports aren’t shown because this app currently records expenses only.</p>
     </div>
   );
 }

@@ -95,7 +95,7 @@ export function useFinanceApp(repository = financeRepository) {
   }, [budgets, budgetHistory]);
 
   const filteredTransactions = useMemo(
-    () => [...transactions].filter((tx) => tx.type === 'expense').sort((a, b) => new Date(b.date) - new Date(a.date)),
+    () => [...transactions].filter((tx) => tx.type === 'expense').sort((a, b) => (b.date || '').localeCompare(a.date || '')),
     [transactions]
   );
 

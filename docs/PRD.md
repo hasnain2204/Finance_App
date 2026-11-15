@@ -1110,7 +1110,7 @@ The product should preserve the approved design direction.
 | Theme | Light only |
 | Primary currency | PKR |
 | Typography | Inter |
-| Primary color | #2563EB |
+| Primary color | #17634f |
 | Background | #F8FAFC |
 | Surface | #FFFFFF |
 | Main text | #111827 |

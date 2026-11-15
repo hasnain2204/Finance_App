@@ -665,3 +665,275 @@ export function buildBackupPayload(data) {
     exportedAt: new Date().toISOString()
   }, null, 2);
 }
+
+export function filterTransactionsByRange(transactions = [], rangeKey = 'this-month', referenceDate = new Date()) {
+  const ref = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  const currentMonthStr = getLocalDateString(ref).slice(0, 7);
+
+  if (rangeKey === 'all-time') {
+    return [...transactions].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }
+
+  if (rangeKey === 'this-month') {
+    return transactions
+      .filter((tx) => tx.date?.startsWith(currentMonthStr))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }
+
+  if (rangeKey === 'last-month') {
+    const prevDate = new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
+    const prevMonthStr = getLocalDateString(prevDate).slice(0, 7);
+    return transactions
+      .filter((tx) => tx.date?.startsWith(prevMonthStr))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }
+
+  const monthsBack = rangeKey === '3-months' ? 3 : rangeKey === '6-months' ? 6 : 1;
+  const cutoffDate = new Date(ref.getFullYear(), ref.getMonth() - (monthsBack - 1), 1);
+  const cutoffStr = getLocalDateString(cutoffDate).slice(0, 7);
+
+  return transactions
+    .filter((tx) => (tx.date || '').slice(0, 7) >= cutoffStr && (tx.date || '').slice(0, 7) <= currentMonthStr)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+export function calculateSpendingVelocity({
+  transactions = [],
+  monthlyExpense = 0,
+  overallBudget = null,
+  referenceDate = new Date()
+}) {
+  const ref = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  const dayOfMonth = Math.max(1, ref.getDate());
+  const daysInMonth = new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate();
+  const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
+
+  const totalExpense = monthlyExpense > 0
+    ? monthlyExpense
+    : calculateExpenseTotal(transactions, getLocalDateString(ref).slice(0, 7));
+
+  const dailyAverage = totalExpense / dayOfMonth;
+  const projectedTotal = totalExpense + (dailyAverage * daysRemaining);
+  const remainingBudget = overallBudget !== null && overallBudget > 0
+    ? Math.max(0, overallBudget - totalExpense)
+    : 0;
+  const safeDailyLimit = daysRemaining > 0 ? remainingBudget / daysRemaining : 0;
+
+  if (overallBudget !== null && overallBudget > 0) {
+    const dailyBudgetRunRate = overallBudget / daysInMonth;
+    const velocityRatio = dailyBudgetRunRate > 0 ? dailyAverage / dailyBudgetRunRate : 1;
+    const projectedRemaining = overallBudget - projectedTotal;
+
+    if (totalExpense > overallBudget) {
+      return {
+        dailyAverage,
+        projectedTotal,
+        safeDailyLimit: 0,
+        daysElapsed: dayOfMonth,
+        daysRemaining,
+        daysInMonth,
+        velocityRatio,
+        status: 'danger',
+        label: 'Over Budget',
+        message: `Exceeded by ${formatCurrency(totalExpense - overallBudget)}`
+      };
+    }
+
+    if (projectedTotal > overallBudget) {
+      const isEarlyMonth = dayOfMonth <= 3;
+      return {
+        dailyAverage,
+        projectedTotal,
+        safeDailyLimit,
+        daysElapsed: dayOfMonth,
+        daysRemaining,
+        daysInMonth,
+        velocityRatio,
+        status: 'warning',
+        label: 'Pacing High',
+        message: isEarlyMonth
+          ? `Early pace high. Safe limit: ${formatCurrency(safeDailyLimit)}/day`
+          : `May exceed budget by ${formatCurrency(Math.abs(projectedRemaining))}`
+      };
+    }
+
+    return {
+      dailyAverage,
+      projectedTotal,
+      safeDailyLimit,
+      daysElapsed: dayOfMonth,
+      daysRemaining,
+      daysInMonth,
+      velocityRatio,
+      status: 'good',
+      label: 'On Track',
+      message: `Projected ${formatCurrency(projectedTotal)} (${Math.round((projectedTotal / overallBudget) * 100)}% of budget)`
+    };
+  }
+
+  return {
+    dailyAverage,
+    projectedTotal,
+    safeDailyLimit: null,
+    daysElapsed: dayOfMonth,
+    daysRemaining,
+    daysInMonth,
+    velocityRatio: 1,
+    status: 'neutral',
+    label: 'Daily Pace',
+    message: `Average ${formatCurrency(dailyAverage)} / day`
+  };
+}
+
+export function calculateWeekdayWeekendSplit(transactions = []) {
+  let weekdayTotal = 0;
+  let weekendTotal = 0;
+  let weekdayCount = 0;
+  let weekendCount = 0;
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+
+  for (const tx of transactions) {
+    if (tx.type !== 'expense' || !tx.date) continue;
+    const dateObj = new Date(`${tx.date}T00:00:00`);
+    if (Number.isNaN(dateObj.getTime())) continue;
+    const day = dateObj.getDay();
+    const amount = Number(tx.amount || 0);
+
+    dayTotals[day] += amount;
+
+    if (day === 0 || day === 6) {
+      weekendTotal += amount;
+      weekendCount += 1;
+    } else {
+      weekdayTotal += amount;
+      weekdayCount += 1;
+    }
+  }
+
+  const grandTotal = weekdayTotal + weekendTotal;
+  let peakDayIndex = 0;
+  let maxDayTotal = 0;
+  for (let i = 0; i < 7; i++) {
+    if (dayTotals[i] > maxDayTotal) {
+      maxDayTotal = dayTotals[i];
+      peakDayIndex = i;
+    }
+  }
+  const peakDay = maxDayTotal > 0 ? { name: dayNames[peakDayIndex], amount: maxDayTotal } : null;
+
+  return {
+    weekdayTotal,
+    weekendTotal,
+    grandTotal,
+    weekdayPercent: grandTotal > 0 ? (weekdayTotal / grandTotal) * 100 : 0,
+    weekendPercent: grandTotal > 0 ? (weekendTotal / grandTotal) * 100 : 0,
+    weekdayCount,
+    weekendCount,
+    peakDay
+  };
+}
+
+export function calculateCategorySurge(
+  transactions = [],
+  currentMonth,
+  previousMonth,
+  categoryMap = {}
+) {
+  if (!currentMonth || !previousMonth) return null;
+
+  const currentTotals = calculateCategoryExpenseTotals(transactions, currentMonth);
+  const previousTotals = calculateCategoryExpenseTotals(transactions, previousMonth);
+
+  let largestSurge = null;
+
+  for (const [catId, currentAmt] of Object.entries(currentTotals)) {
+    const prevAmt = previousTotals[catId] || 0;
+    const diff = currentAmt - prevAmt;
+    if (diff > 0 && currentAmt >= 500) {
+      const isNew = prevAmt === 0;
+      const percentIncrease = prevAmt > 0 ? (diff / prevAmt) * 100 : 100;
+      if (!largestSurge || diff > largestSurge.diffAmount) {
+        largestSurge = {
+          categoryId: catId,
+          categoryName: categoryMap[catId]?.name || 'Category',
+          currentAmount: currentAmt,
+          previousAmount: prevAmt,
+          percentChange: percentIncrease,
+          diffAmount: diff,
+          isNew
+        };
+      }
+    }
+  }
+
+  return largestSurge;
+}
+
+export function calculateFinancialHealthScore({
+  totalSpent = 0,
+  overallBudget = 0,
+  daysElapsed = 1,
+  daysInMonth = 30
+}) {
+  if (!overallBudget || overallBudget <= 0) {
+    return { score: null, rating: 'No Budget Set', label: 'Set Budget' };
+  }
+
+  if (totalSpent > overallBudget) {
+    const overPercent = ((totalSpent - overallBudget) / overallBudget) * 100;
+    const score = Math.max(15, Math.round(50 - overPercent * 0.8));
+    return { score, rating: 'Attention Needed' };
+  }
+
+  const timeElapsedRatio = daysElapsed / daysInMonth;
+  const budgetSpentRatio = totalSpent / overallBudget;
+
+  if (budgetSpentRatio <= timeElapsedRatio) {
+    // Spending slower than or equal to time elapsed: High Score (80-100)
+    const bonus = (timeElapsedRatio - budgetSpentRatio) * 30;
+    const score = Math.min(100, Math.round(82 + bonus));
+    return { score, rating: score >= 90 ? 'Excellent' : 'Good' };
+  }
+
+  // Spending faster than time elapsed: Moderate Score (50-79)
+  const penalty = (budgetSpentRatio - timeElapsedRatio) * 60;
+  const score = Math.max(45, Math.round(78 - penalty));
+  return { score, rating: score >= 65 ? 'Good' : 'Fair' };
+}
+
+export function calculateAnalyticsOverview(transactions = [], {
+  currentMonth = '',
+  categoryMap = {},
+  paymentMap = {}
+} = {}) {
+  let totalExpense = 0;
+  let totalIncome = 0;
+  let currentMonthExpense = 0;
+  const categoryTotals = {};
+  const paymentTotals = {};
+
+  for (const tx of transactions) {
+    const amount = Number(tx.amount || 0);
+    if (tx.type === 'expense') {
+      totalExpense += amount;
+      if (currentMonth && tx.date?.startsWith(currentMonth)) {
+        currentMonthExpense += amount;
+        const catId = tx.categoryId || 'cat-other';
+        categoryTotals[catId] = (categoryTotals[catId] || 0) + amount;
+        const pmId = tx.paymentMethodId || 'pm-other';
+        paymentTotals[pmId] = (paymentTotals[pmId] || 0) + amount;
+      }
+    } else if (tx.type === 'income') {
+      totalIncome += amount;
+    }
+  }
+
+  return {
+    totalExpense,
+    totalIncome,
+    currentMonthExpense,
+    categoryTotals,
+    paymentTotals
+  };
+}

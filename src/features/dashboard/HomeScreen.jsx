@@ -1,5 +1,12 @@
-import { Plus } from 'lucide-react';
-import { calculateExpenseTotal, formatCurrency, fromPaisa } from '../../lib/finance';
+import { useMemo } from 'react';
+import { Plus, Zap } from 'lucide-react';
+import {
+  calculateExpenseTotal,
+  calculateSpendingVelocity,
+  formatCurrency,
+  fromPaisa,
+  getLocalDateString
+} from '../../lib/finance';
 import { Panel, PanelHeader, EmptyState } from '../../components/ui';
 import { HistoryItem } from '../transactions/HistoryItem';
 import { WeeklyTrendChart } from './WeeklyTrendChart';
@@ -23,6 +30,20 @@ export function HomeScreen({
   const availableBalance = overallBudgetAmount === null
     ? null
     : overallBudgetAmount - calculateExpenseTotal(transactions);
+
+  const currentMonthStr = useMemo(() => getLocalDateString().slice(0, 7), []);
+  const monthlyExpense = useMemo(
+    () => calculateExpenseTotal(transactions, currentMonthStr),
+    [transactions, currentMonthStr]
+  );
+
+  const velocity = useMemo(() => {
+    return calculateSpendingVelocity({
+      transactions,
+      monthlyExpense,
+      overallBudget: overallBudgetAmount
+    });
+  }, [transactions, monthlyExpense, overallBudgetAmount]);
 
   return (
     <div className="home-dashboard">
@@ -54,6 +75,24 @@ export function HomeScreen({
             <span>Total expenses</span>
             <strong>{formatCurrency(calculateExpenseTotal(transactions))}</strong>
           </div>
+        </div>
+
+        <div className="home-velocity-card" aria-label="Spending pace and projection">
+          <div className="home-velocity-row">
+            <span className="home-velocity-label">
+              <Zap size={13} className="home-velocity-icon" /> Daily Pace
+            </span>
+            <span className={`status-pill ${velocity.status}`}>{velocity.label}</span>
+          </div>
+          <div className="home-velocity-metrics">
+            <strong>{formatCurrency(velocity.dailyAverage)} <small>/ day</small></strong>
+            <span>{velocity.message}</span>
+          </div>
+          {velocity.safeDailyLimit !== null && velocity.safeDailyLimit > 0 ? (
+            <div className="home-velocity-safe-limit">
+              Safe Daily Limit: <strong>{formatCurrency(velocity.safeDailyLimit)}</strong> / day
+            </div>
+          ) : null}
         </div>
 
         <button type="button" className="primary-action full hero-add-button" onClick={onOpenAddExpense}>
