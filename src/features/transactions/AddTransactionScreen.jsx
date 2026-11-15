@@ -21,28 +21,60 @@ export function AddTransactionScreen({
 
       <section className="add-transaction-content">
         <form className="transaction-form" onSubmit={onSubmit}>
-          <label htmlFor="transaction-amount">Amount (PKR)</label>
-          <input id="transaction-amount" name="amount" type="number" step="0.01" min="0.01" value={form.amount} onChange={onChange} placeholder="Rs0" />
+          <div className="form-inline-row">
+            <label htmlFor="transaction-amount" className="form-inline-label">
+              Amount <span className="required-star" aria-hidden="true">*</span>
+            </label>
+            <div className="form-inline-control">
+              <input
+                id="transaction-amount"
+                name="amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                value={form.amount}
+                onChange={onChange}
+                placeholder="0.00"
+              />
+            </div>
+          </div>
 
-          <label htmlFor="transaction-category">Category</label>
-          <select id="transaction-category" name="categoryId" value={form.categoryId} onChange={onChange}>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>{category.name}</option>
-            ))}
-          </select>
+          <div className="form-inline-row">
+            <label htmlFor="transaction-category" className="form-inline-label">Category</label>
+            <div className="form-inline-control">
+              <select id="transaction-category" name="categoryId" value={form.categoryId} onChange={onChange}>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-          <label htmlFor="transaction-title">Description</label>
-          <input id="transaction-title" name="title" value={form.title} onChange={onChange} placeholder="Description" />
+          <div className="form-inline-row">
+            <label htmlFor="transaction-method" className="form-inline-label">Payment Method</label>
+            <div className="form-inline-control">
+              <select id="transaction-method" name="paymentMethodId" value={form.paymentMethodId} onChange={onChange}>
+                {paymentMethods.map((method) => (
+                  <option key={method.id} value={method.id}>{method.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-          <label htmlFor="transaction-method">Payment Method</label>
-          <select id="transaction-method" name="paymentMethodId" value={form.paymentMethodId} onChange={onChange}>
-            {paymentMethods.map((method) => (
-              <option key={method.id} value={method.id}>{method.name}</option>
-            ))}
-          </select>
+          <div className="form-inline-row">
+            <label htmlFor="transaction-date" className="form-inline-label">Date</label>
+            <div className="form-inline-control">
+              <input id="transaction-date" name="date" type="date" value={form.date} onChange={onChange} />
+            </div>
+          </div>
 
-          <label htmlFor="transaction-date">Date</label>
-          <input id="transaction-date" name="date" type="date" value={form.date} onChange={onChange} />
+          <div className="form-inline-row">
+            <label htmlFor="transaction-title" className="form-inline-label">Description</label>
+            <div className="form-inline-control">
+              <input id="transaction-title" name="title" value={form.title} onChange={onChange} placeholder="Description" />
+            </div>
+          </div>
 
           <button className="primary-action full transaction-save-button" type="submit">
             {editingTransactionId ? 'Save Changes' : 'Save Expense'}

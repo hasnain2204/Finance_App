@@ -22,9 +22,29 @@ export function BudgetScreen({
     <div className="stacked-blocks">
       <Panel>
         <form ref={budgetFormRef} className="budget-form" onSubmit={onSave}>
-          <div className="budget-entry-box">
-            <div className="budget-field-row">
-              <label htmlFor="budget-category">Category</label>
+          <div className="form-inline-row">
+            <label htmlFor="budget-amount" className="form-inline-label">
+              Amount <span className="required-star" aria-hidden="true">*</span>
+            </label>
+            <div className="form-inline-control">
+              <input
+                id="budget-amount"
+                name="amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={budgetForm.amount}
+                onChange={onFormChange}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-inline-row">
+            <label htmlFor="budget-category" className="form-inline-label">Category</label>
+            <div className="form-inline-control">
               <select
                 id="budget-category"
                 name="budgetCategory"
@@ -37,9 +57,11 @@ export function BudgetScreen({
                 ))}
               </select>
             </div>
+          </div>
 
-            <div className="budget-field-row">
-              <label htmlFor="budget-date">Date</label>
+          <div className="form-inline-row">
+            <label htmlFor="budget-date" className="form-inline-label">Date</label>
+            <div className="form-inline-control">
               <input
                 id="budget-date"
                 name="date"
@@ -49,40 +71,24 @@ export function BudgetScreen({
                 required
               />
             </div>
+          </div>
 
-            <div className="budget-field-row">
-              <label htmlFor="budget-amount">Amount (Rs)</label>
+          <div className="form-inline-row">
+            <label htmlFor="budget-description" className="form-inline-label">Description</label>
+            <div className="form-inline-control">
               <input
-                id="budget-amount"
-                name="amount"
-                type="number"
-                min="0.01"
-                step="0.01"
-                inputMode="decimal"
-                placeholder="Rs 2000"
-                value={budgetForm.amount}
-                onChange={onFormChange}
-                required
-              />
-            </div>
-
-            <div className="budget-field-row">
-              <label htmlFor="budget-description">Description</label>
-              <textarea
                 id="budget-description"
-                className="budget-description-field"
                 name="description"
                 value={budgetForm.description}
                 onChange={onFormChange}
-                placeholder="(optional)"
-                rows="1"
+                placeholder="Description"
               />
             </div>
-
-            <button className="primary-action full" type="submit">
-              {editingBudgetHistoryId ? 'Save Changes' : 'Save Budget'}
-            </button>
           </div>
+
+          <button className="primary-action full transaction-save-button" type="submit">
+            {editingBudgetHistoryId ? 'Save Changes' : 'Save Budget'}
+          </button>
 
           <StatusMessage type={status.type} message={status.message} />
         </form>

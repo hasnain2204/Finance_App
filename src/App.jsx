@@ -1,9 +1,10 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeftRight,
   ChartNoAxesCombined,
   Ellipsis,
   House,
+  Plus,
   WalletCards
 } from 'lucide-react';
 import { useFinanceApp, navItems } from './hooks/useFinanceApp';
@@ -54,6 +55,62 @@ function AppContent({ app, activateCloudRuntime }) {
     loadData,
     repository
   } = app;
+
+  const [isTransactionsScrolled, setIsTransactionsScrolled] = useState(false);
+  const lastNavClickRef = useRef({ tab: null, time: 0 });
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    const shell = document.querySelector('.app-shell');
+    if (shell) shell.scrollTop = 0;
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'transactions') {
+      setIsTransactionsScrolled(false);
+      return;
+    }
+    const handleScroll = () => {
+      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      setIsTransactionsScrolled(scrollY > 45);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [tab]);
+
+  const handleNavClick = (name) => {
+    const now = Date.now();
+    const isSameTab = tab === name;
+    const isDoubleClick = isSameTab && (now - lastNavClickRef.current.time < 380);
+    lastNavClickRef.current = { tab: name, time: now };
+
+    if (!isSameTab) {
+      setTab(name);
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      const shell = document.querySelector('.app-shell');
+      if (shell) shell.scrollTop = 0;
+      return;
+    }
+
+    if (isDoubleClick) {
+      if (name === 'home') {
+        window.location.reload();
+        return;
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+      const shell = document.querySelector('.app-shell');
+      if (shell) shell.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      const shellScroll = document.querySelector('.app-shell')?.scrollTop || 0;
+      if (scrollY > 10 || shellScroll > 10) {
+        window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        const shell = document.querySelector('.app-shell');
+        if (shell) shell.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  };
 
   const handleCloudSyncToggle = async (enabled) => {
     if (!auth || !sync) throw new Error('Cloud Sync is not ready yet.');
@@ -294,6 +351,20 @@ function AppContent({ app, activateCloudRuntime }) {
     <div className="app-shell">
       <header className={`topbar ${tab === 'home' ? 'topbar-home' : ''}`}>
         <h1>{tab === 'transactions' ? 'Transactions' : tab === 'analytics' ? 'Analytics' : tab === 'budget' ? 'Budget' : tab === 'more' ? 'More' : 'Home'}</h1>
+        {tab === 'transactions' && isTransactionsScrolled ? (
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="topbar-add-expense-btn"
+              onClick={app.openAddExpense}
+              aria-label="Add Expense"
+              title="Add Expense"
+            >
+              <Plus size={16} strokeWidth={2.4} />
+              <span>Add Expense</span>
+            </button>
+          </div>
+        ) : null}
         {tab === 'home' ? (
           <div className="topbar-actions">
             <button
@@ -421,7 +492,7 @@ function AppContent({ app, activateCloudRuntime }) {
             key={name}
             type="button"
             className={tab === name ? 'nav-item active' : 'nav-item'}
-            onClick={() => setTab(name)}
+            onClick={() => handleNavClick(name)}
             aria-current={tab === name ? 'page' : undefined}
           >
             <span className="nav-icon" aria-hidden="true">
