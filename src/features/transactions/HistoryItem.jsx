@@ -1,5 +1,6 @@
-import { ArrowUpRight, WalletCards } from 'lucide-react';
+import { WalletCards } from 'lucide-react';
 import { formatCurrency, formatDate, fromPaisa } from '../../lib/finance';
+import { CategoryIcon } from '../../components/ui';
 
 export function HistoryItem({
   entry,
@@ -47,7 +48,11 @@ export function HistoryItem({
       aria-label={`View ${title} transaction`}
     >
       <div className={`transaction-icon ${isBudgetChange ? 'budget-change' : 'expense'}`}>
-        {isBudgetChange ? <WalletCards size={16} /> : <ArrowUpRight size={16} />}
+        {isBudgetChange ? (
+          <WalletCards size={18} />
+        ) : (
+          <CategoryIcon nameOrId={categoryMap[entry.categoryId]?.name || entry.categoryId} size={18} />
+        )}
       </div>
       <div className="transaction-copy">
         <strong>{isBudgetChange ? title : categoryMap[entry.categoryId]?.name || 'Other'}</strong>

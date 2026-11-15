@@ -13,6 +13,7 @@ import {
   Zap
 } from 'lucide-react';
 import {
+  buildMonthlyExpenseTrend,
   calculateCategorySurge,
   calculateExpenseTotal,
   calculateFinancialHealthScore,
@@ -24,7 +25,7 @@ import {
   fromPaisa,
   getLocalDateString
 } from '../../lib/finance';
-import { EmptyState, Panel, PanelHeader } from '../../components/ui';
+import { CategoryIcon, EmptyState, Panel, PanelHeader } from '../../components/ui';
 
 export function AnalyticsScreen({
   transactions = [],
@@ -113,6 +114,52 @@ export function AnalyticsScreen({
       daysInMonth: velocity.daysInMonth
     });
   }, [monthlyExpense, overallBudget, velocity]);
+
+  // Dynamic Trend & Multi-Period Calculations
+  const trendMonthsCount = timeRange === '3-months' ? 3 : timeRange === '6-months' ? 6 : timeRange === 'all-time' ? 12 : 6;
+  const dynamicMonthlyTrend = useMemo(() => {
+    return buildMonthlyExpenseTrend(transactions, trendMonthsCount, currentDate);
+  }, [transactions, trendMonthsCount, currentDate]);
+
+  const activeHighestTrend = Math.max(1, ...dynamicMonthlyTrend.map((m) => m.amount));
+
+  const periodMonthsCount = useMemo(() => {
+    if (timeRange === 'this-month' || timeRange === 'last-month') return 1;
+    if (timeRange === '3-months') return 3;
+    if (timeRange === '6-months') return 6;
+    const monthsSet = new Set(filteredTransactions.map((tx) => (tx.date || '').slice(0, 7)));
+    return Math.max(1, monthsSet.size);
+  }, [timeRange, filteredTransactions]);
+
+  const monthlyAverageSpent = totalSpentInRange / periodMonthsCount;
+
+  const lastMonthDays = useMemo(() => {
+    return new Date(currentDate.getFullYear(), currentDate.getMonth(), 0).getDate();
+  }, [currentDate]);
+
+  const lastMonthHealthScore = useMemo(() => {
+    return calculateFinancialHealthScore({
+      totalSpent: totalSpentInRange,
+      overallBudget,
+      daysElapsed: lastMonthDays,
+      daysInMonth: lastMonthDays
+    });
+  }, [totalSpentInRange, overallBudget, lastMonthDays]);
+
+  const multiMonthHealthScore = useMemo(() => {
+    return calculateFinancialHealthScore({
+      totalSpent: monthlyAverageSpent,
+      overallBudget,
+      daysElapsed: 30,
+      daysInMonth: 30
+    });
+  }, [monthlyAverageSpent, overallBudget]);
+
+  const activeHealthScore = useMemo(() => {
+    if (timeRange === 'this-month') return healthScore;
+    if (timeRange === 'last-month') return lastMonthHealthScore;
+    return multiMonthHealthScore;
+  }, [timeRange, healthScore, lastMonthHealthScore, multiMonthHealthScore]);
 
   // 4. Weekday vs Weekend Spending Split
   const weekdayWeekend = useMemo(() => {
@@ -205,59 +252,181 @@ export function AnalyticsScreen({
       <Panel className="analytics-overview">
         <PanelHeader>
           <div>
-            <p className="eyebrow">Financial Velocity</p>
-            <h2>Pace &amp; Projections</h2>
+            <p className="eyebrow">
+              {timeRange === 'this-month'
+                ? 'Financial Velocity'
+                : timeRange === 'last-month'
+                  ? 'Historical Performance'
+                  : 'Multi-Period Summary'}
+            </p>
+            <h2>
+              {timeRange === 'this-month'
+                ? 'Pace & Projections'
+                : timeRange === 'last-month'
+                  ? 'Last Month Overview'
+                  : `${timeRangeOptions.find((o) => o.key === timeRange)?.label} Performance`}
+            </h2>
           </div>
           <div className="analytics-health-badge" title="Budget Adherence Rating">
-            <span className="health-score">{healthScore.score !== null ? healthScore.score : '—'}</span>
-            <span className="health-label">{healthScore.rating}</span>
+            <span className="health-score">{activeHealthScore.score !== null ? activeHealthScore.score : '—'}</span>
+            <span className="health-label">{activeHealthScore.rating}</span>
           </div>
         </PanelHeader>
 
-        <div className="velocity-summary-grid">
-          <div className="velocity-metric-item">
-            <span className="velocity-label">
-              <Zap size={14} className="velocity-icon" /> Daily Run-Rate
-            </span>
-            <strong className="velocity-value">{formatCurrency(velocity.dailyAverage)}</strong>
-            <small className="velocity-sub">Pace per day ({velocity.daysElapsed} days in)</small>
-          </div>
+        {timeRange === 'this-month' ? (
+          <>
+            <div className="velocity-summary-grid">
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Zap size={14} className="velocity-icon" /> Daily Run-Rate
+                </span>
+                <strong className="velocity-value">{formatCurrency(velocity.dailyAverage)}</strong>
+                <small className="velocity-sub">Pace per day ({velocity.daysElapsed} days in)</small>
+              </div>
 
-          <div className="velocity-metric-item">
-            <span className="velocity-label">
-              <Clock size={14} className="velocity-icon" /> Est. Month-End
-            </span>
-            <strong className={`velocity-value ${velocity.status === 'danger' ? 'danger' : ''}`}>
-              {formatCurrency(velocity.projectedTotal)}
-            </strong>
-            <small className="velocity-sub">{velocity.message}</small>
-          </div>
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Clock size={14} className="velocity-icon" /> Est. Month-End
+                </span>
+                <strong className={`velocity-value ${velocity.status === 'danger' ? 'danger' : ''}`}>
+                  {formatCurrency(velocity.projectedTotal)}
+                </strong>
+                <small className="velocity-sub">{velocity.message}</small>
+              </div>
 
-          {velocity.safeDailyLimit !== null && velocity.safeDailyLimit > 0 ? (
-            <div className="velocity-metric-item">
-              <span className="velocity-label">
-                <CheckCircle2 size={14} className="velocity-icon" /> Safe Daily Limit
-              </span>
-              <strong className="velocity-value">{formatCurrency(velocity.safeDailyLimit)}</strong>
-              <small className="velocity-sub">Remaining daily allowance</small>
+              {velocity.safeDailyLimit !== null && velocity.safeDailyLimit > 0 ? (
+                <div className="velocity-metric-item">
+                  <span className="velocity-label">
+                    <CheckCircle2 size={14} className="velocity-icon" /> Safe Daily Limit
+                  </span>
+                  <strong className="velocity-value">{formatCurrency(velocity.safeDailyLimit)}</strong>
+                  <small className="velocity-sub">Remaining daily allowance</small>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
 
-        {overallBudget > 0 ? (
-          <div className="velocity-timeline-bar" aria-label="Month progress and budget burn">
-            <div className="timeline-labels">
-              <span>Day {velocity.daysElapsed} of {velocity.daysInMonth}</span>
-              <span className={`status-pill ${velocity.status}`}>{velocity.label}</span>
+            {overallBudget > 0 ? (
+              <div className="velocity-timeline-bar" aria-label="Month progress and budget burn">
+                <div className="timeline-labels">
+                  <span>Day {velocity.daysElapsed} of {velocity.daysInMonth}</span>
+                  <span className={`status-pill ${velocity.status}`}>{velocity.label}</span>
+                </div>
+                <div className="timeline-track">
+                  <div
+                    className={`timeline-fill ${velocity.status}`}
+                    style={{ width: `${Math.min(100, Math.round((velocity.dailyAverage * velocity.daysElapsed / overallBudget) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : timeRange === 'last-month' ? (
+          <>
+            <div className="velocity-summary-grid">
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Calendar size={14} className="velocity-icon" /> Total Spent
+                </span>
+                <strong className="velocity-value">{formatCurrency(totalSpentInRange)}</strong>
+                <small className="velocity-sub">Last calendar month</small>
+              </div>
+
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Zap size={14} className="velocity-icon" /> Daily Average
+                </span>
+                <strong className="velocity-value">
+                  {formatCurrency(lastMonthDays > 0 ? totalSpentInRange / lastMonthDays : 0)}
+                </strong>
+                <small className="velocity-sub">Across {lastMonthDays} days</small>
+              </div>
+
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <CheckCircle2 size={14} className="velocity-icon" /> Budget Status
+                </span>
+                <strong className="velocity-value">
+                  {overallBudget > 0
+                    ? totalSpentInRange <= overallBudget
+                      ? 'Within Budget'
+                      : 'Exceeded'
+                    : 'No Budget'}
+                </strong>
+                <small className="velocity-sub">
+                  {overallBudget > 0
+                    ? totalSpentInRange <= overallBudget
+                      ? `Saved ${formatCurrency(overallBudget - totalSpentInRange)}`
+                      : `Over by ${formatCurrency(totalSpentInRange - overallBudget)}`
+                    : 'Set a budget for tracking'}
+                </small>
+              </div>
             </div>
-            <div className="timeline-track">
-              <div
-                className={`timeline-fill ${velocity.status}`}
-                style={{ width: `${Math.min(100, Math.round((velocity.dailyAverage * velocity.daysElapsed / overallBudget) * 100))}%` }}
-              />
+
+            {overallBudget > 0 ? (
+              <div className="velocity-timeline-bar" aria-label="Last month final budget burn">
+                <div className="timeline-labels">
+                  <span>Full Month ({lastMonthDays} Days)</span>
+                  <span className={`status-pill ${totalSpentInRange <= overallBudget ? 'good' : 'danger'}`}>
+                    {totalSpentInRange <= overallBudget ? 'Under Budget' : 'Over Budget'}
+                  </span>
+                </div>
+                <div className="timeline-track">
+                  <div
+                    className={`timeline-fill ${totalSpentInRange <= overallBudget ? 'good' : 'danger'}`}
+                    style={{ width: `${Math.min(100, Math.round((totalSpentInRange / overallBudget) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div className="velocity-summary-grid">
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Calendar size={14} className="velocity-icon" /> Period Total
+                </span>
+                <strong className="velocity-value">{formatCurrency(totalSpentInRange)}</strong>
+                <small className="velocity-sub">{filteredTransactions.length} transactions recorded</small>
+              </div>
+
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Activity size={14} className="velocity-icon" /> Monthly Average
+                </span>
+                <strong className="velocity-value">{formatCurrency(monthlyAverageSpent)}</strong>
+                <small className="velocity-sub">Average across {periodMonthsCount} months</small>
+              </div>
+
+              <div className="velocity-metric-item">
+                <span className="velocity-label">
+                  <Zap size={14} className="velocity-icon" /> Daily Average
+                </span>
+                <strong className="velocity-value">
+                  {formatCurrency(totalSpentInRange / Math.max(1, periodMonthsCount * 30))}
+                </strong>
+                <small className="velocity-sub">Per day in this range</small>
+              </div>
             </div>
-          </div>
-        ) : null}
+
+            {overallBudget > 0 ? (
+              <div className="velocity-timeline-bar" aria-label="Period average budget utilization">
+                <div className="timeline-labels">
+                  <span>Period Avg vs Monthly Budget</span>
+                  <span className={`status-pill ${monthlyAverageSpent <= overallBudget ? 'good' : 'danger'}`}>
+                    {monthlyAverageSpent <= overallBudget ? 'Sustainable Pace' : 'High Velocity'}
+                  </span>
+                </div>
+                <div className="timeline-track">
+                  <div
+                    className={`timeline-fill ${monthlyAverageSpent <= overallBudget ? 'good' : 'danger'}`}
+                    style={{ width: `${Math.min(100, Math.round((monthlyAverageSpent / overallBudget) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
       </Panel>
 
       {/* 3. Category Surge Alert (Anomaly Detection) */}
@@ -368,9 +537,14 @@ export function AnalyticsScreen({
                   onClick={() => onOpenTransaction && onOpenTransaction(tx)}
                   role={onOpenTransaction ? 'button' : undefined}
                 >
-                  <div className="tx-copy">
-                    <strong>{tx.title || 'Expense'}</strong>
-                    <small>{formatDate(tx.date, dateFormat)} · {paymentMap[tx.paymentMethodId]?.name || 'Cash'}</small>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="transaction-icon expense" style={{ width: 34, height: 34, flexShrink: 0 }}>
+                      <CategoryIcon nameOrId={selectedCategoryData.label} size={15} />
+                    </div>
+                    <div className="tx-copy">
+                      <strong>{tx.title || 'Expense'}</strong>
+                      <small>{formatDate(tx.date, dateFormat)} · {paymentMap[tx.paymentMethodId]?.name || 'Cash'}</small>
+                    </div>
                   </div>
                   <strong className="tx-amount">{formatCurrency(tx.amount)}</strong>
                 </div>
@@ -465,40 +639,69 @@ export function AnalyticsScreen({
         <PanelHeader>
           <div>
             <p className="eyebrow">Budget</p>
-            <h2>Budget Performance</h2>
+            <h2>
+              {timeRange === 'this-month'
+                ? 'This Month’s Budget'
+                : timeRange === 'last-month'
+                  ? 'Last Month’s Budget'
+                  : `${timeRangeOptions.find((o) => o.key === timeRange)?.label} Budget`}
+            </h2>
           </div>
+          <span className="range-indicator">{timeRangeOptions.find((o) => o.key === timeRange)?.label}</span>
         </PanelHeader>
         {overallBudget > 0 ? (
           <section className="budget-overall-summary">
             <div className="budget-summary">
               <div className="budget-summary-item">
-                <span>Total budget</span>
-                <strong>{formatCurrency(overallBudget)}</strong>
+                <span>{timeRange === 'this-month' || timeRange === 'last-month' ? 'Total budget' : 'Cumulative budget'}</span>
+                <strong>
+                  {formatCurrency(overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount))}
+                </strong>
               </div>
               <div className="budget-summary-item">
                 <span>Total expenses</span>
-                <strong>{formatCurrency(monthlyExpense)}</strong>
+                <strong>{formatCurrency(totalSpentInRange)}</strong>
               </div>
               <div className="budget-summary-item">
-                <span>{overallBudget - monthlyExpense < 0 ? 'Spent over budget' : 'Remaining budget'}</span>
-                <strong className={overallBudget - monthlyExpense < 0 ? 'expense' : 'budget-change-value'}>
-                  {formatCurrency(Math.abs(overallBudget - monthlyExpense))}
+                <span>
+                  {overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount) - totalSpentInRange < 0
+                    ? 'Spent over budget'
+                    : 'Remaining budget'}
+                </span>
+                <strong
+                  className={
+                    overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount) - totalSpentInRange < 0
+                      ? 'expense'
+                      : 'budget-change-value'
+                  }
+                >
+                  {formatCurrency(
+                    Math.abs(overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount) - totalSpentInRange)
+                  )}
                 </strong>
               </div>
             </div>
             <div
-              className={`budget-progress${overallBudget - monthlyExpense < 0 ? ' over-budget' : ''}`}
+              className={`budget-progress${overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount) - totalSpentInRange < 0 ? ' over-budget' : ''}`}
               role="progressbar"
               aria-label="Overall budget spent"
               aria-valuemin="0"
-              aria-valuemax={overallBudget}
-              aria-valuenow={Math.min(monthlyExpense, overallBudget)}
-              aria-valuetext={`${Math.round((monthlyExpense / overallBudget) * 100)}% used`}
+              aria-valuemax={overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount)}
+              aria-valuenow={Math.min(totalSpentInRange, overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount))}
+              aria-valuetext={`${Math.round((totalSpentInRange / (overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount))) * 100)}% used`}
             >
-              <span style={{ width: `${Math.min((monthlyExpense / overallBudget) * 100, 100)}%` }} />
+              <span
+                style={{
+                  width: `${Math.min((totalSpentInRange / (overallBudget * (timeRange === 'this-month' || timeRange === 'last-month' ? 1 : periodMonthsCount))) * 100, 100)}%`
+                }}
+              />
             </div>
             <p className="analytics-footnote">
-              {Math.round((monthlyExpense / overallBudget) * 100)}% of your monthly budget has been used.
+              {timeRange === 'this-month'
+                ? `${Math.round((totalSpentInRange / overallBudget) * 100)}% of your monthly budget has been used.`
+                : timeRange === 'last-month'
+                  ? `${Math.round((totalSpentInRange / overallBudget) * 100)}% of last month's budget was used.`
+                  : `${Math.round((totalSpentInRange / (overallBudget * periodMonthsCount)) * 100)}% of the cumulative budget for this period used.`}
             </p>
           </section>
         ) : (
@@ -506,17 +709,23 @@ export function AnalyticsScreen({
         )}
       </Panel>
 
-      {/* 8. Six-Month Trend Chart */}
+      {/* 8. Monthly Trend Chart */}
       <Panel className="analytics-section">
         <PanelHeader>
           <div>
             <p className="eyebrow">Trend</p>
-            <h2>6-Month Spending History</h2>
+            <h2>
+              {timeRange === '3-months'
+                ? '3-Month Spending History'
+                : timeRange === 'all-time'
+                  ? 'All-Time Spending History'
+                  : `${trendMonthsCount}-Month Spending History`}
+            </h2>
           </div>
         </PanelHeader>
-        <div className="monthly-trend-chart" role="img" aria-label="Expense totals for the last six months">
-          {monthlyExpenseTrend.map((month) => {
-            const barHeight = month.amount > 0 ? Math.max(8, (month.amount / highestTrendAmount) * 100) : 0;
+        <div className="monthly-trend-chart" role="img" aria-label={`Expense totals for ${trendMonthsCount} months`}>
+          {dynamicMonthlyTrend.map((month) => {
+            const barHeight = month.amount > 0 ? Math.max(8, (month.amount / activeHighestTrend) * 100) : 0;
             return (
               <div className="monthly-trend-column" key={month.month}>
                 <strong title={`${month.month}: ${formatCurrency(month.amount)}`}>

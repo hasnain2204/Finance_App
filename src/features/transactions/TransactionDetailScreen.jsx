@@ -1,6 +1,6 @@
-import { Trash2, Utensils, WalletCards } from 'lucide-react';
+import { Trash2, WalletCards } from 'lucide-react';
 import { formatCurrency, formatDate, fromPaisa } from '../../lib/finance';
-import { BackHeader, ConfirmDialog } from '../../components/ui';
+import { BackHeader, ConfirmDialog, CategoryIcon } from '../../components/ui';
 
 export function TransactionDetailScreen({
   selectedTransaction,
@@ -134,7 +134,7 @@ export function TransactionDetailScreen({
 
       <section className="detail-content">
         <div className="detail-summary">
-          <span className="detail-icon expense"><Utensils size={26} strokeWidth={1.7} /></span>
+          <span className="detail-icon expense"><CategoryIcon nameOrId={categoryName} size={26} /></span>
           <h2>{categoryName}</h2>
           <strong className="expense">- {formatCurrency(Number(selectedTransaction.amount || 0))}</strong>
           <p>Expense</p>

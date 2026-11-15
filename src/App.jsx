@@ -292,7 +292,7 @@ function AppContent({ app, activateCloudRuntime }) {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <header className={`topbar ${tab === 'home' ? 'topbar-home' : ''}`}>
         <h1>{tab === 'transactions' ? 'Transactions' : tab === 'analytics' ? 'Analytics' : tab === 'budget' ? 'Budget' : tab === 'more' ? 'More' : 'Home'}</h1>
         {tab === 'home' ? (
           <div className="topbar-actions">
