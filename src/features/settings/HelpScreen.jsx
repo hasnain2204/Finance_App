@@ -7,20 +7,24 @@ export function HelpScreen({ onBack }) {
 
       <section className="help-faq-list" aria-label="Frequently asked questions">
         <article className="help-faq-item">
-          <h2>How is my balance calculated?</h2>
-          <p>Income − Expenses = Available Balance.</p>
+          <h2>1. How is my available balance calculated?</h2>
+          <p>Cumulative Budget − Total Expenses = Available Balance. If an overall budget is not set, available balance displays as Not set.</p>
         </article>
         <article className="help-faq-item">
-          <h2>Can I use PWS offline?</h2>
-          <p>Yes. Record transactions without an internet connection. They are saved locally; cloud transfer waits until you configure an account and confirm the sync preview.</p>
+          <h2>2. Does PWS work completely offline?</h2>
+          <p>Yes. All your transactions, budgets, categories, and analytics are stored locally on your device. You can track your expenses anywhere without internet.</p>
         </article>
         <article className="help-faq-item">
-          <h2>How do I keep my data safe?</h2>
-          <p>In More, choose Export Data. Keep your backup outside the app before clearing browser data.</p>
+          <h2>3. How does Cloud Sync work?</h2>
+          <p>When Cloud Sync is enabled, your data securely syncs to your account. Any newly added transactions automatically sync to the cloud every 30 seconds.</p>
         </article>
         <article className="help-faq-item">
-          <h2>Can I sync or change currency?</h2>
-          <p>Cloud sync is available from More → Cloud account after Supabase is configured and the initial merge is confirmed. PWS V1 uses PKR only.</p>
+          <h2>4. How do I back up or restore my data?</h2>
+          <p>Go to More → Data &amp; Backup → Export Data to download a secure backup file or audit PDF. Use Restore Data to import and recover records anytime.</p>
+        </article>
+        <article className="help-faq-item">
+          <h2>5. How can I change my currency or date format?</h2>
+          <p>Open More → Preferences → Currency to select your preferred global or Asian currency, and Date Format to customize date styling across the entire app.</p>
         </article>
       </section>
     </main>

@@ -5,7 +5,8 @@ import {
   calculateSpendingVelocity,
   formatCurrency,
   fromPaisa,
-  getLocalDateString
+  getLocalDateString,
+  getSmartGreeting
 } from '../../lib/finance';
 import { Panel, PanelHeader, EmptyState } from '../../components/ui';
 import { HistoryItem } from '../transactions/HistoryItem';
@@ -74,8 +75,8 @@ export function HomeScreen({
   return (
     <div className="home-dashboard">
       <section className="home-heading-meta">
-        <h2>{`Good ${new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 18 ? 'Afternoon' : 'Evening'}, ${preferences?.name || 'User'}`}</h2>
-        <p>{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+        <h2>{`${getSmartGreeting()}, ${preferences?.name || 'User'}`}</h2>
+        <p>{new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
       </section>
 
       <div ref={sentinelRef} className="hero-scroll-sentinel" aria-hidden="true" />

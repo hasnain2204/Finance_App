@@ -13,6 +13,7 @@ import {
   fromPaisa,
   getLocalDateString,
   parseBackupPayload,
+  setGlobalCurrency,
   toPaisa,
   validateTransaction
 } from '../lib/finance';
@@ -162,7 +163,7 @@ export function useFinanceApp(repository = financeRepository) {
       setCategories(allCategories.filter((category) => category.type === 'expense'));
       setPaymentMethods(allMethods.length ? allMethods : defaultPaymentMethods);
       setBudgets(allBudgets);
-      setPreferences({
+      const loadedPrefs = {
         id: 'app',
         currency: 'PKR',
         lightMode: true,
@@ -173,7 +174,9 @@ export function useFinanceApp(repository = financeRepository) {
           ? appPreferences.dateFormat
           : 'DD MMM YYYY',
         notificationsEnabled: Boolean(appPreferences?.notificationsEnabled)
-      });
+      };
+      setPreferences(loadedPrefs);
+      setGlobalCurrency(loadedPrefs.currency);
       return true;
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to load saved data.' });
@@ -234,6 +237,21 @@ export function useFinanceApp(repository = financeRepository) {
       setPreferenceSaveStatus({ type: 'success', message: 'Preferences saved.' });
     } catch (error) {
       setPreferenceSaveStatus({ type: 'error', message: 'Could not save preferences. Please try again.' });
+    }
+  };
+
+  const handleSaveCurrency = async (currencyCode) => {
+    const nextPreferences = {
+      ...(preferences || { id: 'app', lightMode: true, dateFormat: 'DD MMM YYYY' }),
+      currency: currencyCode
+    };
+    try {
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+      setGlobalCurrency(currencyCode);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Could not save currency preference.' };
     }
   };
 
@@ -818,6 +836,7 @@ export function useFinanceApp(repository = financeRepository) {
     handleSaveBudget,
     openAccount,
     openPaymentMethods,
-    openPreferences
+    openPreferences,
+    handleSaveCurrency
   };
 }

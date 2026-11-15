@@ -10,16 +10,16 @@ export function MoreScreen({
   onOpenExport,
   onOpenRestore,
   onOpenCloudSync,
+  onOpenCurrency,
   onOpenPreferences,
   onOpenHelp,
   onOpenAbout
 }) {
   return (
     <div className="more-page">
-      <section className="more-group" aria-labelledby="more-cloud-account-heading">
-        <h2 id="more-cloud-account-heading" className="more-group-title">Cloud account</h2>
+      <section className="more-group" aria-label="Account">
         <button type="button" className="more-row" onClick={onOpenCloudAccount}>
-          <span>Sign in or create account</span>
+          <span>Account</span>
           <span className="more-row-trailing">
             <ChevronRight className="more-chevron" size={20} />
           </span>
@@ -57,10 +57,13 @@ export function MoreScreen({
 
       <section className="more-group" aria-labelledby="more-preferences-heading">
         <h2 id="more-preferences-heading" className="more-group-title">Preferences</h2>
-        <div className="more-row more-row-muted">
+        <button type="button" className="more-row" onClick={onOpenCurrency}>
           <span>Currency</span>
-          <span className="more-row-value">PKR · Fixed</span>
-        </div>
+          <span className="more-row-trailing">
+            <span className="more-row-value">{preferences?.currency || 'PKR'}</span>
+            <ChevronRight className="more-chevron" size={20} />
+          </span>
+        </button>
         <button type="button" className="more-row" onClick={onOpenPreferences}>
           <span>Date Format</span>
           <span className="more-row-trailing">
@@ -78,13 +81,13 @@ export function MoreScreen({
       </section>
 
       <section className="more-group" aria-labelledby="more-help-heading">
-        <h2 id="more-help-heading" className="more-group-title">Help</h2>
-        <button type="button" className="more-row" onClick={onOpenHelp}>
-          <span>Help &amp; FAQ</span>
-          <ChevronRight className="more-chevron" size={20} />
-        </button>
+        <h2 id="more-help-heading" className="more-group-title">Help &amp; Info</h2>
         <button type="button" className="more-row" onClick={onOpenAbout}>
           <span>About</span>
+          <ChevronRight className="more-chevron" size={20} />
+        </button>
+        <button type="button" className="more-row" onClick={onOpenHelp}>
+          <span>Help &amp; FAQ</span>
           <ChevronRight className="more-chevron" size={20} />
         </button>
       </section>

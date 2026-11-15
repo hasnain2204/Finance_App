@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Plus, WalletCards } from 'lucide-react';
 import { Panel, PanelHeader, EmptyState } from '../../components/ui';
 import { HistoryItem } from './HistoryItem';
 import { getLocalDateString } from '../../lib/finance';
@@ -61,18 +61,35 @@ export function TransactionsScreen({
   paymentMap,
   dateFormat,
   onOpenAddExpense,
+  onOpenBudget,
   onOpenTransaction
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    // After 2s, expand horizontally from left to right
+    const expandTimer = setTimeout(() => {
+      setIsExpanded(true);
+    }, 2000);
+
+    // Keep in full form for 10s (2s wait + 10s full form = 12s total), then automatically return to original form
+    const collapseTimer = setTimeout(() => {
+      setIsExpanded(false);
+    }, 12000);
+
+    return () => {
+      clearTimeout(expandTimer);
+      clearTimeout(collapseTimer);
+    };
+  }, []);
+
   const dateGroups = useMemo(
     () => groupTransactionsByDateBuckets(transactionHistory),
     [transactionHistory]
   );
 
   return (
-    <div className="stacked-blocks">
-      <button type="button" className="primary-action full transaction-list-add-button" onClick={onOpenAddExpense}>
-        <Plus size={16} /> Add Expense
-      </button>
+    <div className="stacked-blocks transactions-view-shell">
       <Panel>
         <PanelHeader>
           <div>
@@ -91,7 +108,7 @@ export function TransactionsScreen({
                 <div className="transaction-date-group-header">
                   <h3 className="transaction-date-group-title">{group.title}</h3>
                   <span className="transaction-date-group-badge">
-                    {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
+                    {group.items.length}
                   </span>
                 </div>
                 <div className="transaction-list">
@@ -111,6 +128,30 @@ export function TransactionsScreen({
           </div>
         )}
       </Panel>
+
+      <div className="floating-action-group" aria-label="Quick actions">
+        <button
+          type="button"
+          className={`fab-button ${isExpanded ? 'is-expanded' : ''}`}
+          onClick={onOpenAddExpense}
+          aria-label="Add expense"
+          title="Add Expense"
+        >
+          <Plus size={22} strokeWidth={2.4} className="fab-icon" />
+          <span className="fab-label">Add Expense</span>
+        </button>
+
+        <button
+          type="button"
+          className={`fab-button fab-budget-button ${isExpanded ? 'is-expanded' : ''}`}
+          onClick={onOpenBudget}
+          aria-label="Add to budget"
+          title="Add Budget"
+        >
+          <WalletCards size={20} strokeWidth={2.2} className="fab-icon" />
+          <span className="fab-label">Add Budget</span>
+        </button>
+      </div>
     </div>
   );
 }

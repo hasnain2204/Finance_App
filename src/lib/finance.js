@@ -18,6 +18,59 @@ export function getLocalDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+export function getSmartGreeting(date = new Date()) {
+  const hours = date.getHours();
+  // 00:00 to 04:59 -> Late night / middle of night: Good Night
+  // 05:00 to 11:59 -> Good Morning
+  // 12:00 to 16:59 -> Good Afternoon
+  // 17:00 to 20:59 -> Good Evening
+  // 21:00 to 23:59 -> Good Night
+  if (hours < 5 || hours >= 21) {
+    return 'Good Night';
+  }
+  if (hours < 12) {
+    return 'Good Morning';
+  }
+  if (hours < 17) {
+    return 'Good Afternoon';
+  }
+  return 'Good Evening';
+}
+
+export const supportedCurrencies = [
+  { code: 'PKR', symbol: 'PKR', name: 'Pakistani Rupee', country: 'Pakistan', flag: '🇵🇰' },
+  { code: 'INR', symbol: '₹', name: 'Indian Rupee', country: 'India', flag: '🇮🇳' },
+  { code: 'USD', symbol: '$', name: 'US Dollar', country: 'United States', flag: '🇺🇸' },
+  { code: 'EUR', symbol: '€', name: 'Euro', country: 'European Union', flag: '🇪🇺' },
+  { code: 'GBP', symbol: '£', name: 'British Pound', country: 'United Kingdom', flag: '🇬🇧' },
+  { code: 'AED', symbol: 'AED', name: 'UAE Dirham', country: 'United Arab Emirates', flag: '🇦🇪' },
+  { code: 'SAR', symbol: 'SAR', name: 'Saudi Riyal', country: 'Saudi Arabia', flag: '🇸🇦' },
+  { code: 'BDT', symbol: '৳', name: 'Bangladeshi Taka', country: 'Bangladesh', flag: '🇧🇩' },
+  { code: 'JPY', symbol: '¥', name: 'Japanese Yen', country: 'Japan', flag: '🇯🇵' },
+  { code: 'CNY', symbol: '¥', name: 'Chinese Yuan', country: 'China', flag: '🇨🇳' },
+  { code: 'MYR', symbol: 'RM', name: 'Malaysian Ringgit', country: 'Malaysia', flag: '🇲🇾' },
+  { code: 'IDR', symbol: 'Rp', name: 'Indonesian Rupiah', country: 'Indonesia', flag: '🇮🇩' },
+  { code: 'TRY', symbol: '₺', name: 'Turkish Lira', country: 'Turkey', flag: '🇹🇷' },
+  { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar', country: 'Canada', flag: '🇨🇦' },
+  { code: 'AUD', symbol: 'AU$', name: 'Australian Dollar', country: 'Australia', flag: '🇦🇺' }
+];
+
+export const currencyMap = Object.fromEntries(
+  supportedCurrencies.map((c) => [c.code, c])
+);
+
+let currentGlobalCurrency = 'PKR';
+
+export function setGlobalCurrency(currency) {
+  if (currency && typeof currency === 'string') {
+    currentGlobalCurrency = currency.toUpperCase();
+  }
+}
+
+export function getGlobalCurrency() {
+  return currentGlobalCurrency;
+}
+
 export const dateFormatOptions = ['DD MMM YYYY', 'DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'];
 
 export function formatDate(value, dateFormat = 'DD MMM YYYY') {
@@ -124,13 +177,16 @@ export function buildMonthlyBudgetTrend(
   });
 }
 
-export function formatCurrency(value) {
+export function formatCurrency(value, currency) {
   const numericValue = Number(value || 0);
+  const activeCurrency = (currency || currentGlobalCurrency || 'PKR').toUpperCase();
+  const meta = currencyMap[activeCurrency] || { symbol: activeCurrency };
+
   const formatted = new Intl.NumberFormat('en-PK', {
     maximumFractionDigits: 2
   }).format(numericValue);
 
-  return `PKR ${formatted}`;
+  return `${meta.symbol} ${formatted}`;
 }
 
 export function calculateExpenseTotal(transactions = [], month) {

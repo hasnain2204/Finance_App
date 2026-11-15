@@ -207,6 +207,36 @@ export function useFinanceSync(repository, auth) {
     return () => window.clearTimeout(timer);
   }, [auth?.user?.id, service, status.status, syncEnabled, syncNow]);
 
+  // Periodic 30-second auto-sync: when Cloud Sync is enabled, automatically check outbox every 30s
+  // and sync if any pending transactions or mutations have been queued.
+  useEffect(() => {
+    const accountUserId = auth?.user?.id;
+    if (!accountUserId || auth?.loading || syncPreferenceLoading || !syncEnabled || !globalThis.navigator?.onLine) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const database = getDatabase();
+        if (!database) return;
+        if (await getSyncMetadata(database, 'initialSyncConfirmed') !== true) return;
+
+        const outbox = await service.getOutbox();
+        const hasPendingItems = outbox.some(
+          (entry) => entry.ownerUserId === accountUserId && (entry.status === 'pending' || entry.status === 'retry')
+        );
+        if (hasPendingItems) {
+          await service.syncNow(accountUserId);
+          await refresh();
+        }
+      } catch (_) {
+        // Silent catch for background auto-sync poll
+      }
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, [auth?.loading, auth?.user?.id, getDatabase, refresh, service, syncEnabled, syncPreferenceLoading]);
+
   useEffect(() => { void refresh(); }, [refresh]);
 
   return {

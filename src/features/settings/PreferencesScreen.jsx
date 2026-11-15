@@ -16,15 +16,6 @@ export function PreferencesScreen({
       <BackHeader title="Preferences" onBack={onBack} backLabel="Back to More" />
 
       <form className="preferences-content" onSubmit={onSave}>
-        <section className="preferences-currency-card">
-          <h2>Currency</h2>
-          <div className="preferences-currency-row">
-            <span>Pakistani Rupees</span>
-            <span>PKR · Fixed</span>
-          </div>
-          <p>All amounts use Rs. PWS V1 supports PKR only.</p>
-        </section>
-
         <div className="preferences-date-field">
           <label htmlFor="date-format">Date Format</label>
           <select

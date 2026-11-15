@@ -17,6 +17,7 @@ import { BudgetScreen } from './features/budgets/BudgetScreen';
 import { CategoriesScreen } from './features/categories/CategoriesScreen';
 import { MoreScreen } from './features/settings/MoreScreen';
 import { PreferencesScreen } from './features/settings/PreferencesScreen';
+import { CurrencyScreen } from './features/settings/CurrencyScreen';
 import { HelpScreen } from './features/settings/HelpScreen';
 import { AboutScreen } from './features/settings/AboutScreen';
 import { CloudSyncScreen } from './features/settings/CloudSyncScreen';
@@ -56,27 +57,12 @@ function AppContent({ app, activateCloudRuntime }) {
     repository
   } = app;
 
-  const [isTransactionsScrolled, setIsTransactionsScrolled] = useState(false);
   const lastNavClickRef = useRef({ tab: null, time: 0 });
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     const shell = document.querySelector('.app-shell');
     if (shell) shell.scrollTop = 0;
-  }, [tab]);
-
-  useEffect(() => {
-    if (tab !== 'transactions') {
-      setIsTransactionsScrolled(false);
-      return;
-    }
-    const handleScroll = () => {
-      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
-      setIsTransactionsScrolled(scrollY > 45);
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
   }, [tab]);
 
   const handleNavClick = (name) => {
@@ -310,12 +296,22 @@ function AppContent({ app, activateCloudRuntime }) {
     );
   }
 
+  if (tab === 'currency') {
+    return (
+      <CurrencyScreen
+        currentCurrency={preferences?.currency || 'PKR'}
+        onSelectCurrency={app.handleSaveCurrency}
+        onBack={() => setTab('more')}
+      />
+    );
+  }
+
   if (tab === 'help') {
     return <HelpScreen onBack={() => setTab('more')} />;
   }
 
   if (tab === 'about') {
-    return <AboutScreen onBack={() => setTab('more')} />;
+    return <AboutScreen preferences={preferences} onBack={() => setTab('more')} />;
   }
 
   if (tab === 'export-data') {
@@ -351,20 +347,6 @@ function AppContent({ app, activateCloudRuntime }) {
     <div className="app-shell">
       <header className={`topbar ${tab === 'home' ? 'topbar-home' : ''}`}>
         <h1>{tab === 'transactions' ? 'Transactions' : tab === 'analytics' ? 'Analytics' : tab === 'budget' ? 'Budget' : tab === 'more' ? 'More' : 'Home'}</h1>
-        {tab === 'transactions' && isTransactionsScrolled ? (
-          <div className="topbar-actions">
-            <button
-              type="button"
-              className="topbar-add-expense-btn"
-              onClick={app.openAddExpense}
-              aria-label="Add Expense"
-              title="Add Expense"
-            >
-              <Plus size={16} strokeWidth={2.4} />
-              <span>Add Expense</span>
-            </button>
-          </div>
-        ) : null}
         {tab === 'home' ? (
           <div className="topbar-actions">
             <button
@@ -420,6 +402,7 @@ function AppContent({ app, activateCloudRuntime }) {
             paymentMap={app.paymentMap}
             dateFormat={preferences?.dateFormat}
             onOpenAddExpense={app.openAddExpense}
+            onOpenBudget={() => setTab('budget')}
             onOpenTransaction={app.openTransactionDetail}
           />
         )}
@@ -477,6 +460,7 @@ function AppContent({ app, activateCloudRuntime }) {
               activateCloudRuntime();
               setTab('cloud-sync');
             }}
+            onOpenCurrency={() => setTab('currency')}
             onOpenPreferences={app.openPreferences}
             onOpenHelp={() => setTab('help')}
             onOpenAbout={() => {
