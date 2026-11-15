@@ -9,6 +9,7 @@ export function MoreScreen({
   onOpenPaymentMethods,
   onOpenExport,
   onOpenRestore,
+  onOpenCloudSync,
   onOpenPreferences,
   onOpenHelp,
   onOpenAbout
@@ -20,7 +21,6 @@ export function MoreScreen({
         <button type="button" className="more-row" onClick={onOpenCloudAccount}>
           <span>Sign in or create account</span>
           <span className="more-row-trailing">
-            <span className="more-row-value">Optional</span>
             <ChevronRight className="more-chevron" size={20} />
           </span>
         </button>
@@ -48,10 +48,10 @@ export function MoreScreen({
           <span>Restore Data</span>
           <ChevronRight className="more-chevron" size={20} />
         </button>
-        <div className="more-row more-row-muted">
+        <button type="button" className="more-row" onClick={onOpenCloudSync}>
           <span>Cloud Sync</span>
-          <span className="more-row-value">Coming Later</span>
-        </div>
+          <ChevronRight className="more-chevron" size={20} />
+        </button>
         <StatusMessage type={status.type} message={status.message} />
       </section>
 

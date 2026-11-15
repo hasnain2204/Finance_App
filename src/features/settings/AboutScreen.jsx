@@ -1,4 +1,4 @@
-import { ShieldCheck, WalletCards } from 'lucide-react';
+import { WalletCards } from 'lucide-react';
 import { BackHeader } from '../../components/ui';
 
 export function AboutScreen({ onBack }) {
@@ -14,14 +14,6 @@ export function AboutScreen({ onBack }) {
           <p className="about-description">A simple personal finance tool for students and users in Pakistan.</p>
         </article>
 
-        <div className="export-data-notice about-local-notice">
-          <ShieldCheck size={20} aria-hidden="true" />
-          <div>
-            <strong>Local-first &amp; offline friendly</strong>
-            <p>No account required. Track income and expenses, understand your spending and set budgets in Pakistani Rupees.</p>
-          </div>
-        </div>
-
         <section className="more-group about-details" aria-label="App information">
           <div className="more-row">
             <span>Version</span>
@@ -34,10 +26,6 @@ export function AboutScreen({ onBack }) {
           <div className="more-row">
             <span>Appearance</span>
             <span className="more-row-value">Light</span>
-          </div>
-          <div className="more-row more-row-muted">
-            <span>Cloud Sync</span>
-            <span className="more-row-value">Coming Later</span>
           </div>
         </section>
       </section>

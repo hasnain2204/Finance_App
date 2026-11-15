@@ -30,7 +30,7 @@ The project is an early functional prototype, not a complete V1 release.
 - Light mode only
 - Local-first storage
 - Search and filter excluded from V1
-- Cloud sync deferred
+- Cloud sync is available after account connection and explicit initial-merge confirmation; live Supabase multi-device behavior still needs verification.
 
 ## Structure
 - public/ - PWA static assets and metadata
@@ -45,6 +45,7 @@ The project is an early functional prototype, not a complete V1 release.
 - src/data/ - local seed/default data and domain models
 
 ## Project docs
+- [V1.2 verification](docs/V1.2.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 - [docs/TECH_STACK.md](docs/TECH_STACK.md)

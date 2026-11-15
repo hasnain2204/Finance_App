@@ -11,6 +11,21 @@ export function useFinanceSync(repository, auth) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [syncPreference, setSyncPreference] = useState({ userId: null, enabled: false, loading: true });
+  const userId = auth?.user?.id || null;
+  const syncPreferenceLoading = Boolean(auth?.loading ||
+    (userId && (syncPreference.userId !== userId || syncPreference.loading)));
+  const syncEnabled = Boolean(userId && syncPreference.userId === userId &&
+    !syncPreference.loading && syncPreference.enabled);
+
+  const getDatabase = useCallback(() => repository.syncStorage || repository.getSyncStorage?.(), [repository]);
+
+  const isSyncEnabledForUser = useCallback(async (accountUserId) => {
+    if (!accountUserId) return false;
+    const database = getDatabase();
+    if (!database) throw new Error('Local sync storage is unavailable.');
+    return await getSyncMetadata(database, `cloudSyncEnabled:${accountUserId}`) === true;
+  }, [getDatabase]);
 
   const refresh = useCallback(async () => {
     const userId = auth?.user?.id;
@@ -21,8 +36,10 @@ export function useFinanceSync(repository, auth) {
       ]);
       setStatus(nextStatus);
       setConflicts(nextConflicts.filter((conflict) => conflict.status === 'unresolved'));
+      return nextStatus;
     } catch (refreshError) {
       setError(refreshError?.message || 'Unable to read local sync status.');
+      return null;
     }
   }, [auth?.user?.id, service]);
 
@@ -31,7 +48,10 @@ export function useFinanceSync(repository, auth) {
     setError('');
     setMessage('');
     try {
-      const result = await action(auth?.user?.id);
+      const accountUserId = auth?.user?.id;
+      if (!accountUserId) throw new Error('Sign in to a cloud account before syncing.');
+      if (!await isSyncEnabledForUser(accountUserId)) throw new Error('Turn on Cloud Sync from About before syncing this account.');
+      const result = await action(accountUserId);
       setMessage(successText || 'Sync activity completed.');
       await refresh();
       return result;
@@ -42,14 +62,17 @@ export function useFinanceSync(repository, auth) {
     } finally {
       setBusy(false);
     }
-  }, [auth?.user?.id, refresh]);
+  }, [auth?.user?.id, isSyncEnabledForUser, refresh]);
 
   const reviewInitialSync = useCallback(async () => {
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const nextPreview = await service.getInitialSyncPreview(auth?.user?.id);
+      const accountUserId = auth?.user?.id;
+      if (!accountUserId) throw new Error('Sign in to a cloud account before reviewing sync.');
+      if (!await isSyncEnabledForUser(accountUserId)) throw new Error('Turn on Cloud Sync from About before reviewing the initial sync.');
+      const nextPreview = await service.getInitialSyncPreview(accountUserId);
       setPreview(nextPreview);
       return nextPreview;
     } catch (previewError) {
@@ -58,7 +81,19 @@ export function useFinanceSync(repository, auth) {
     } finally {
       setBusy(false);
     }
-  }, [auth?.user?.id, service]);
+  }, [auth?.user?.id, isSyncEnabledForUser, service]);
+
+  const setSyncEnabled = useCallback(async (enabled) => {
+    const accountUserId = auth?.user?.id;
+    if (!accountUserId) throw new Error('Connect a cloud account before changing its sync setting.');
+    const database = getDatabase();
+    if (!database) throw new Error('Local sync storage is unavailable.');
+    const nextEnabled = Boolean(enabled);
+    await setSyncMetadata(database, `cloudSyncEnabled:${accountUserId}`, nextEnabled);
+    setSyncPreference({ userId: accountUserId, enabled: nextEnabled, loading: false });
+    setError('');
+    return nextEnabled;
+  }, [auth?.user?.id, getDatabase]);
 
   const confirmInitialSync = useCallback(() => run(
     (userId) => service.confirmInitialSync(userId),
@@ -88,23 +123,56 @@ export function useFinanceSync(repository, auth) {
   useEffect(() => {
     if (auth?.loading) return undefined;
     let cancelled = false;
-    const database = repository.syncStorage || repository.getSyncStorage?.();
+    const database = getDatabase();
     Promise.resolve(setSyncMetadata(database, 'activeAuthUserId', auth?.user?.id || null))
       .finally(() => { if (!cancelled) refresh(); });
     return () => { cancelled = true; };
-  }, [auth?.loading, auth?.user?.id, repository, refresh]);
+  }, [auth?.loading, auth?.user?.id, getDatabase, refresh]);
 
   useEffect(() => {
-    const userId = auth?.user?.id;
-    if (!userId || auth?.loading || !globalThis.navigator?.onLine) return undefined;
+    if (auth?.loading) return undefined;
+    const accountUserId = auth?.user?.id || null;
+    let cancelled = false;
+    if (!accountUserId) {
+      setSyncPreference({ userId: null, enabled: false, loading: false });
+      return undefined;
+    }
+
+    setSyncPreference((current) => current.userId === accountUserId
+      ? { ...current, loading: true }
+      : { userId: accountUserId, enabled: false, loading: true });
+    const loadPreference = async () => {
+      try {
+        const enabled = await isSyncEnabledForUser(accountUserId);
+        if (!cancelled) setSyncPreference({ userId: accountUserId, enabled, loading: false });
+      } catch (preferenceError) {
+        if (!cancelled) {
+          setSyncPreference({ userId: accountUserId, enabled: false, loading: false });
+          setError(preferenceError?.message || 'Unable to read the Cloud Sync setting.');
+        }
+      }
+    };
+    void loadPreference();
+    return () => { cancelled = true; };
+  }, [auth?.loading, auth?.user?.id, isSyncEnabledForUser]);
+
+  useEffect(() => {
+    const accountUserId = auth?.user?.id;
+    if (!accountUserId || auth?.loading || syncPreferenceLoading || !syncEnabled ||
+      !globalThis.navigator?.onLine) return undefined;
     let cancelled = false;
     const tryAutomaticSync = async () => {
-      const owner = await service.getStatus({ userId });
-      if (cancelled || owner.ownerUserId !== userId) return;
-      const database = repository.syncStorage || repository.getSyncStorage?.();
-      if (await getSyncMetadata(database, 'initialSyncConfirmed') !== true) return;
-      try { await service.syncNow(userId); } catch { /* status/error is surfaced by the next refresh */ }
-      if (!cancelled) await refresh();
+      try {
+        const owner = await service.getStatus({ userId: accountUserId });
+        if (cancelled || owner.ownerUserId !== accountUserId) return;
+        const database = getDatabase();
+        if (await getSyncMetadata(database, 'initialSyncConfirmed') !== true) return;
+        await service.syncNow(accountUserId);
+      } catch (automaticSyncError) {
+        if (!cancelled) setError(automaticSyncError?.message || 'Automatic sync could not complete.');
+      } finally {
+        if (!cancelled) await refresh();
+      }
     };
     const onResume = () => {
       if (globalThis.navigator?.onLine) void tryAutomaticSync();
@@ -122,10 +190,10 @@ export function useFinanceSync(repository, auth) {
       window.removeEventListener('focus', onResume);
       document.removeEventListener('visibilitychange', onResume);
     };
-  }, [auth?.loading, auth?.user?.id, refresh, repository, service]);
+  }, [auth?.loading, auth?.user?.id, getDatabase, refresh, service, syncEnabled, syncPreferenceLoading]);
 
   useEffect(() => {
-    if (!auth?.user?.id || status.status !== 'pending') return undefined;
+    if (!auth?.user?.id || !syncEnabled || status.status !== 'pending') return undefined;
     let timer;
     service.getOutbox().then((entries) => {
       const dueTimes = entries
@@ -137,7 +205,7 @@ export function useFinanceSync(repository, auth) {
       timer = window.setTimeout(() => { void syncNow(); }, delay);
     });
     return () => window.clearTimeout(timer);
-  }, [auth?.user?.id, service, status.status, syncNow]);
+  }, [auth?.user?.id, service, status.status, syncEnabled, syncNow]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -145,9 +213,12 @@ export function useFinanceSync(repository, auth) {
     status,
     conflicts,
     preview,
+    syncEnabled,
+    syncPreferenceLoading,
     busy,
     error,
     message,
+    setSyncEnabled,
     reviewInitialSync,
     confirmInitialSync,
     dismissPreview,

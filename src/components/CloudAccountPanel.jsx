@@ -1,7 +1,5 @@
 import { ArrowLeft, Cloud, LogIn, LogOut, UserPlus } from 'lucide-react';
 import { useState } from 'react';
-import { useSupabaseAuth } from '../services/useSupabaseAuth';
-import { useFinanceSync } from '../services/useFinanceSync';
 
 const syncCollectionLabels = {
   categories: 'Categories',
@@ -12,9 +10,7 @@ const syncCollectionLabels = {
   preferences: 'Preferences'
 };
 
-export default function CloudAccountPanel({ onBack, onDataChanged, repository }) {
-  const auth = useSupabaseAuth();
-  const sync = useFinanceSync(repository, auth);
+export default function CloudAccountPanel({ onBack, onDataChanged, auth, sync, onManageSync }) {
   const [mode, setMode] = useState('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,7 +50,7 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
           <Cloud size={20} aria-hidden="true" />
           <div>
             <strong>Local finance stays available</strong>
-            <p>Finance records stay local until you review the device/account counts and explicitly confirm the initial merge.</p>
+            <p>Finance records stay local until sync. </p>
           </div>
         </div>
 
@@ -88,7 +84,15 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
                   This device’s sync queue is bound to another account. Sync is paused to protect that account’s records.
                 </p>
               ) : null}
-              {sync.status.ownerUserId === auth.user.id && sync.status.status !== 'offline' ? (
+              {!sync.syncEnabled ? (
+                <div className="sync-actions">
+                  <p>Cloud Sync is off. Turn it on from About to review or transfer records.</p>
+                  <button type="button" className="link-button" onClick={onManageSync}>
+                    Manage Cloud Sync
+                  </button>
+                </div>
+              ) : null}
+              {sync.syncEnabled && sync.status.ownerUserId === auth.user.id && sync.status.status !== 'offline' ? (
                 <div className="sync-actions">
                   <button type="button" className="primary-action full cloud-auth-submit" onClick={() => runAndRefresh(sync.syncNow)} disabled={sync.busy}>
                     {sync.busy ? 'Syncing…' : 'Sync now'}
@@ -100,7 +104,7 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
                   ) : null}
                 </div>
               ) : null}
-              {!sync.status.ownerUserId || sync.status.ownerUserId === auth.user.id ? (
+              {sync.syncEnabled && (!sync.status.ownerUserId || sync.status.ownerUserId === auth.user.id) ? (
                 <button type="button" className="link-button sync-review-button" onClick={sync.reviewInitialSync} disabled={sync.busy || sync.status.status === 'offline'}>
                   {sync.status.ownerUserId ? 'Review unassigned local changes' : 'Review initial sync'}
                 </button>
@@ -122,6 +126,7 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
               <section className="cloud-auth-card sync-preview-card" aria-labelledby="sync-preview-title">
                 <p className="eyebrow">Review before transfer</p>
                 <h2 id="sync-preview-title">Initial sync preview</h2>
+                {!sync.syncEnabled ? <p>Cloud Sync is off. Turn it on from About before confirming this merge.</p> : null}
                 <p>Confirming will merge by stable sync ID. It will not replace or clear local records. Same-ID changes are preserved as conflicts for you to resolve.</p>
                 <div className="sync-count-table" role="table" aria-label="Local and remote record counts">
                   <div className="sync-count-row sync-count-header" role="row"><span role="columnheader">Collection</span><span role="columnheader">This device</span><span role="columnheader">Account</span></div>
@@ -146,7 +151,7 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
                   </p>
                 ) : null}
                 {sync.status.message ? <p className="cloud-auth-error" role="alert">{sync.status.message}</p> : null}
-                <button type="button" className="primary-action full cloud-auth-submit" onClick={() => runAndRefresh(sync.confirmInitialSync)} disabled={sync.busy || sync.preview.foreignPendingCount > 0 || sync.preview.identityIssueCount > 0}>
+                <button type="button" className="primary-action full cloud-auth-submit" onClick={() => runAndRefresh(sync.confirmInitialSync)} disabled={!sync.syncEnabled || sync.busy || sync.preview.foreignPendingCount > 0 || sync.preview.identityIssueCount > 0}>
                   {sync.busy ? 'Starting sync…' : 'Confirm merge and sync'}
                 </button>
                 <button type="button" className="link-button" onClick={() => sync.refresh().then(() => {})} disabled={sync.busy}>
@@ -172,12 +177,21 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
                   <strong>Account</strong>
                   <pre>{JSON.stringify(conflict.remotePayload, null, 2)}</pre>
                 </details>
-                <div className="sync-conflict-actions">
-                  <button type="button" className="primary-action" onClick={() => runAndRefresh(() => sync.resolveConflict(conflict.id, 'local'))} disabled={sync.busy}>Keep this device’s version</button>
-                  <button type="button" className="secondary-button" onClick={() => runAndRefresh(() => sync.resolveConflict(conflict.id, 'remote'))} disabled={sync.busy}>
-                    {conflict.remotePayload?.deleted_at ? 'Accept account deletion' : 'Use account version'}
-                  </button>
-                </div>
+                {sync.syncEnabled ? (
+                  <div className="sync-conflict-actions">
+                    <button type="button" className="primary-action" onClick={() => runAndRefresh(() => sync.resolveConflict(conflict.id, 'local'))} disabled={sync.busy}>Keep this device’s version</button>
+                    <button type="button" className="secondary-button" onClick={() => runAndRefresh(() => sync.resolveConflict(conflict.id, 'remote'))} disabled={sync.busy}>
+                      {conflict.remotePayload?.deleted_at ? 'Accept account deletion' : 'Use account version'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="sync-actions">
+                    <p>Turn on Cloud Sync from About to resolve this conflict.</p>
+                    <button type="button" className="link-button" onClick={onManageSync}>
+                      Manage Cloud Sync
+                    </button>
+                  </div>
+                )}
               </section>
             ))}
           </>
@@ -185,6 +199,7 @@ export default function CloudAccountPanel({ onBack, onDataChanged, repository })
           <form className="cloud-auth-card cloud-auth-form" onSubmit={handleSubmit}>
             <p className="eyebrow">{mode === 'sign-up' ? 'Create account' : 'Welcome back'}</p>
             <h2>{mode === 'sign-up' ? 'Sign up with email' : 'Sign in with email'}</h2>
+            <p>Gmail addresses are supported; use the email and password registered with your cloud account.</p>
             <label htmlFor="cloud-account-email">Email</label>
             <input
               id="cloud-account-email"

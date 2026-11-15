@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import {
   ArrowLeftRight,
   ChartNoAxesCombined,
@@ -18,15 +18,32 @@ import { MoreScreen } from './features/settings/MoreScreen';
 import { PreferencesScreen } from './features/settings/PreferencesScreen';
 import { HelpScreen } from './features/settings/HelpScreen';
 import { AboutScreen } from './features/settings/AboutScreen';
+import { CloudSyncScreen } from './features/settings/CloudSyncScreen';
 import { ExportDataScreen } from './features/settings/ExportDataScreen';
 import { RestoreDataScreen } from './features/settings/RestoreDataScreen';
 import { PaymentMethodsScreen } from './features/settings/PaymentMethodsScreen';
 import { OnboardingScreen } from './features/settings/OnboardingScreen';
+import { useCloudSync } from './services/CloudSyncContext';
 
 const CloudAccountPanel = lazy(() => import('./components/CloudAccountPanel'));
+const CloudSyncProvider = lazy(() => import('./services/CloudSyncProvider'));
 
 function App() {
   const app = useFinanceApp();
+  const [cloudRuntimeActive, setCloudRuntimeActive] = useState(false);
+  const content = <AppContent app={app} activateCloudRuntime={() => setCloudRuntimeActive(true)} />;
+
+  if (!cloudRuntimeActive) return content;
+
+  return (
+    <Suspense fallback={<main className="account-shell" role="status">Loading Cloud Sync…</main>}>
+      <CloudSyncProvider repository={app.repository}>{content}</CloudSyncProvider>
+    </Suspense>
+  );
+}
+
+function AppContent({ app, activateCloudRuntime }) {
+  const { auth, sync } = useCloudSync();
   const {
     tab,
     setTab,
@@ -37,6 +54,30 @@ function App() {
     loadData,
     repository
   } = app;
+
+  const handleCloudSyncToggle = async (enabled) => {
+    if (!auth || !sync) throw new Error('Cloud Sync is not ready yet.');
+    const accountUserId = auth.user?.id;
+    if (!accountUserId || !auth.user.email) {
+      throw new Error('Connect a cloud account before enabling Cloud Sync.');
+    }
+
+    const currentStatus = await sync.refresh();
+    if (!currentStatus) throw new Error('Unable to verify this device’s sync account.');
+    if (enabled && currentStatus.ownerUserId && currentStatus.ownerUserId !== accountUserId) {
+      throw new Error('This device is bound to another account. Sync is paused to protect its records.');
+    }
+
+    await sync.setSyncEnabled(enabled);
+    if (enabled && currentStatus.ownerUserId !== accountUserId) {
+      const preview = await sync.reviewInitialSync();
+      if (!preview) {
+        await sync.setSyncEnabled(false);
+        throw new Error(sync.error || 'Could not create the initial sync preview.');
+      }
+      setTab('cloud-account');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -150,8 +191,26 @@ function App() {
   if (tab === 'cloud-account') {
     return (
       <Suspense fallback={<main className="account-shell" role="status">Loading account tools…</main>}>
-        <CloudAccountPanel repository={repository} onDataChanged={loadData} onBack={() => setTab('more')} />
+        <CloudAccountPanel
+          auth={auth}
+          sync={sync}
+          onDataChanged={loadData}
+          onBack={() => setTab('more')}
+          onManageSync={() => setTab('cloud-sync')}
+        />
       </Suspense>
+    );
+  }
+
+  if (tab === 'cloud-sync') {
+    return (
+      <CloudSyncScreen
+        auth={auth}
+        sync={sync}
+        onBack={() => setTab('more')}
+        onOpenCloudAccount={() => setTab('cloud-account')}
+        onToggleSync={handleCloudSyncToggle}
+      />
     );
   }
 
@@ -324,7 +383,10 @@ function App() {
           <MoreScreen
             preferences={preferences}
             status={status}
-            onOpenCloudAccount={() => setTab('cloud-account')}
+            onOpenCloudAccount={() => {
+              activateCloudRuntime();
+              setTab('cloud-account');
+            }}
             onOpenAccount={() => app.openAccount()}
             onOpenPaymentMethods={() => app.openPaymentMethods()}
             onOpenExport={() => {
@@ -336,9 +398,15 @@ function App() {
               setStatus({ type: 'idle', message: '' });
               setTab('restore-data');
             }}
+            onOpenCloudSync={() => {
+              activateCloudRuntime();
+              setTab('cloud-sync');
+            }}
             onOpenPreferences={app.openPreferences}
             onOpenHelp={() => setTab('help')}
-            onOpenAbout={() => setTab('about')}
+            onOpenAbout={() => {
+              setTab('about');
+            }}
           />
         )}
       </main>

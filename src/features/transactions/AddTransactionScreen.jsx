@@ -51,7 +51,7 @@ export function AddTransactionScreen({
 
         <StatusMessage type={status.type} message={status.message} />
 
-        <p className="transaction-device-note">Saved on this device.</p>
+        {/* <p className="transaction-device-note">Saved on this device.</p> */}
       </section>
     </main>
   );
