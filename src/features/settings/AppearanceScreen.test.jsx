@@ -15,15 +15,37 @@ describe('AppearanceScreen', () => {
 
     const lightOption = screen.getByRole('radio', { name: 'Light theme' });
     const darkOption = screen.getByRole('radio', { name: 'Dark theme' });
+    const systemOption = screen.getByRole('radio', { name: 'System adaptive theme' });
 
     expect(lightOption.getAttribute('aria-checked')).toBe('true');
     expect(darkOption.getAttribute('aria-checked')).toBe('false');
+    expect(systemOption.getAttribute('aria-checked')).toBe('false');
 
     fireEvent.click(darkOption);
 
     expect(onSaveAppearance).toHaveBeenCalledWith(false);
     expect(darkOption.getAttribute('aria-checked')).toBe('true');
     expect(await screen.findByText(/Dark theme applied and saved/i)).not.toBeNull();
+  });
+
+  it('allows switching to System Adaptive Theme', async () => {
+    const onSaveAppearance = vi.fn().mockResolvedValue({ success: true });
+    render(
+      <AppearanceScreen
+        currentTheme="light"
+        onSaveAppearance={onSaveAppearance}
+        onBack={vi.fn()}
+      />
+    );
+
+    const systemOption = screen.getByRole('radio', { name: 'System adaptive theme' });
+    expect(systemOption.getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(systemOption);
+
+    expect(onSaveAppearance).toHaveBeenCalledWith('system');
+    expect(systemOption.getAttribute('aria-checked')).toBe('true');
+    expect(await screen.findByText(/System Adaptive theme applied and saved/i)).not.toBeNull();
   });
 
   it('allows switching back to Light Theme', async () => {

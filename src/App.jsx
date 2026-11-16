@@ -31,19 +31,28 @@ import { PaymentMethodsScreen } from './features/settings/PaymentMethodsScreen';
 import { BudgetTypesScreen } from './features/settings/BudgetTypesScreen';
 import { OnboardingScreen } from './features/settings/OnboardingScreen';
 import { useCloudSync } from './services/CloudSyncContext';
+import { supabaseConfiguration } from './services/supabaseClient';
 
 const CloudAccountPanel = lazy(() => import('./components/CloudAccountPanel'));
 const CloudSyncProvider = lazy(() => import('./services/CloudSyncProvider'));
 
 function App() {
   const app = useFinanceApp();
-  const [cloudRuntimeActive, setCloudRuntimeActive] = useState(false);
+  const [cloudRuntimeActive, setCloudRuntimeActive] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const hasAuth = Object.keys(window.localStorage).some(
+        (key) => key.startsWith('sb-') || key.includes('supabase.auth.token')
+      );
+      if (hasAuth) return true;
+    }
+    return Boolean(supabaseConfiguration?.isConfigured);
+  });
   const content = <AppContent app={app} activateCloudRuntime={() => setCloudRuntimeActive(true)} />;
 
   if (!cloudRuntimeActive) return content;
 
   return (
-    <Suspense fallback={<main className="account-shell" role="status">Loading Cloud Sync…</main>}>
+    <Suspense fallback={content}>
       <CloudSyncProvider repository={app.repository}>{content}</CloudSyncProvider>
     </Suspense>
   );
@@ -71,20 +80,38 @@ function AppContent({ app, activateCloudRuntime }) {
   }, [tab]);
 
   useEffect(() => {
-    const isDark = preferences?.lightMode === false;
+    const themePref = preferences?.theme || (preferences?.lightMode === false ? 'dark' : (preferences?.lightMode === true ? 'light' : 'system'));
     const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark-theme');
-      document.documentElement.setAttribute('data-theme', 'dark');
-      if (themeColorMeta) themeColorMeta.setAttribute('content', '#111614');
+
+    const applyTheme = (isDark) => {
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+        document.body.classList.add('dark-theme');
+        document.documentElement.setAttribute('data-theme', 'dark');
+        if (themeColorMeta) themeColorMeta.setAttribute('content', '#111614');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.body.classList.remove('dark-theme');
+        document.documentElement.setAttribute('data-theme', 'light');
+        if (themeColorMeta) themeColorMeta.setAttribute('content', '#17634f');
+      }
+    };
+
+    if (themePref === 'system' && typeof window !== 'undefined' && window.matchMedia) {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      applyTheme(mediaQuery.matches);
+      const listener = (event) => applyTheme(event.matches);
+      if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener('change', listener);
+        return () => mediaQuery.removeEventListener('change', listener);
+      } else if (mediaQuery.addListener) {
+        mediaQuery.addListener(listener);
+        return () => mediaQuery.removeListener(listener);
+      }
     } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark-theme');
-      document.documentElement.setAttribute('data-theme', 'light');
-      if (themeColorMeta) themeColorMeta.setAttribute('content', '#17634f');
+      applyTheme(themePref === 'dark');
     }
-  }, [preferences?.lightMode]);
+  }, [preferences?.theme, preferences?.lightMode]);
 
   const handleNavClick = (name) => {
     const now = Date.now();
@@ -267,6 +294,7 @@ function AppContent({ app, activateCloudRuntime }) {
         onBack={() => setTab('more')}
         defaultCategoryId={preferences?.defaultCategoryId}
         onSelectDefault={app.handleSaveDefaultCategory}
+        onReorder={app.handleReorderCategories}
       />
     );
   }
@@ -319,6 +347,7 @@ function AppContent({ app, activateCloudRuntime }) {
         onBack={() => setTab('more')}
         defaultPaymentMethodId={preferences?.defaultPaymentMethodId}
         onSelectDefault={app.handleSaveDefaultPaymentMethod}
+        onReorder={app.handleReorderPaymentMethods}
       />
     );
   }
@@ -343,6 +372,7 @@ function AppContent({ app, activateCloudRuntime }) {
         onBack={() => setTab('more')}
         defaultBudgetTypeId={preferences?.defaultBudgetTypeId}
         onSelectDefault={app.handleSaveDefaultBudgetType}
+        onReorder={app.handleReorderBudgetTypes}
       />
     );
   }
@@ -380,6 +410,7 @@ function AppContent({ app, activateCloudRuntime }) {
   if (tab === 'appearance') {
     return (
       <AppearanceScreen
+        currentTheme={preferences?.theme || (preferences?.lightMode === false ? 'dark' : (preferences?.lightMode === true ? 'light' : 'system'))}
         isLightMode={preferences?.lightMode !== false}
         onSaveAppearance={app.handleSaveAppearance}
         onBack={() => setTab('more')}
@@ -464,6 +495,7 @@ function AppContent({ app, activateCloudRuntime }) {
           <HomeScreen
             preferences={preferences}
             budgets={app.budgets}
+            budgetHistory={app.budgetHistory}
             totalBudgetPaisa={app.totalBudgetPaisa}
             transactions={app.transactions}
             weeklySpending={app.weeklySpending}

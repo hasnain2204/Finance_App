@@ -1,21 +1,57 @@
 import { useState } from 'react';
-import { Sun, Moon, Check } from 'lucide-react';
+import { Sun, Moon, Smartphone } from 'lucide-react';
 import { BackHeader, StatusMessage } from '../../components/ui';
 
-export function AppearanceScreen({ isLightMode = true, onSaveAppearance, onBack }) {
-  const [currentLightMode, setCurrentLightMode] = useState(isLightMode);
+export function AppearanceScreen({
+  currentTheme,
+  isLightMode,
+  onSaveAppearance,
+  onBack
+}) {
+  // Resolve initial theme: support both currentTheme string ('system' | 'light' | 'dark') and isLightMode boolean
+  const initialTheme = currentTheme !== undefined
+    ? currentTheme
+    : (isLightMode === false ? 'dark' : (isLightMode === true ? 'light' : 'system'));
+  const [selectedTheme, setSelectedTheme] = useState(initialTheme);
   const [status, setStatus] = useState({ type: 'idle', message: '' });
 
-  const handleSelectMode = async (lightMode) => {
-    setCurrentLightMode(lightMode);
+  const themeOptions = [
+    {
+      id: 'system',
+      title: 'System Adaptive',
+      subtitle: 'Automatically match your device theme',
+      ariaLabel: 'System adaptive theme',
+      icon: Smartphone
+    },
+    {
+      id: 'light',
+      title: 'Light Theme',
+      subtitle: 'Clean white surfaces with classic emerald',
+      ariaLabel: 'Light theme',
+      icon: Sun
+    },
+    {
+      id: 'dark',
+      title: 'Dark Theme',
+      subtitle: 'Deep luminous surfaces with vibrant emerald',
+      ariaLabel: 'Dark theme',
+      icon: Moon
+    }
+  ];
+
+  const handleSelectMode = async (themeId) => {
+    setSelectedTheme(themeId);
     if (onSaveAppearance) {
-      const result = await onSaveAppearance(lightMode);
+      // Pass boolean or string for backwards compatibility
+      const arg = themeId === 'system' ? 'system' : (themeId === 'light' ? true : false);
+      const result = await onSaveAppearance(arg);
       if (result && result.error) {
         setStatus({ type: 'error', message: result.error });
       } else {
+        const label = themeId === 'system' ? 'System Adaptive' : (themeId === 'light' ? 'Light' : 'Dark');
         setStatus({
           type: 'success',
-          message: `${lightMode ? 'Light' : 'Dark'} theme applied and saved.`
+          message: `${label} theme applied and saved.`
         });
       }
     }
@@ -27,96 +63,40 @@ export function AppearanceScreen({ isLightMode = true, onSaveAppearance, onBack 
 
       <section className="appearance-screen-content">
         <p className="settings-screen-note">
-          Customize how PWS appears on your device. Choose between the classic light theme or a muted dark theme designed for night-time comfort and lower battery usage.
+          Customize how PWS appears on your device. Choose between light, dark, or system adaptive mode to match your device settings automatically.
         </p>
 
-        <div className="appearance-options-grid" role="radiogroup" aria-label="Appearance options">
-          {/* Light Theme Option Card */}
-          <button
-            type="button"
-            className={`appearance-card-option ${currentLightMode ? 'is-selected' : ''}`}
-            onClick={() => handleSelectMode(true)}
-            role="radio"
-            aria-checked={currentLightMode}
-            aria-label="Light theme"
-          >
-            <div className="appearance-card-header">
-              <div className="appearance-icon-circle is-light" aria-hidden="true">
-                <Sun size={22} strokeWidth={2.4} />
-              </div>
-              <div className="appearance-card-title-group">
-                <h3 className="appearance-card-title">Light Theme</h3>
-                <span className="appearance-card-subtitle">Clean surfaces &amp; classic emerald</span>
-              </div>
-              <div className="themed-radio-outer" aria-hidden="true">
-                {currentLightMode && <div className="themed-radio-inner" />}
-              </div>
-            </div>
+        <div className="appearance-toggle-group" role="radiogroup" aria-label="Appearance options">
+          {themeOptions.map((opt) => {
+            const isSelected = selectedTheme === opt.id ||
+              (opt.id === 'light' && selectedTheme === true) ||
+              (opt.id === 'dark' && selectedTheme === false);
+            const Icon = opt.icon;
 
-            {/* Visual Mini Mockup for Light Theme */}
-            <div className="appearance-preview-mockup is-light-mockup" aria-hidden="true">
-              <div className="mockup-topbar">
-                <span className="mockup-pill-logo" />
-                <span className="mockup-pill-btn" />
-              </div>
-              <div className="mockup-card">
-                <span className="mockup-line-primary" />
-                <span className="mockup-line-sub" />
-              </div>
-              <div className="mockup-item">
-                <span className="mockup-dot" />
-                <span className="mockup-text" />
-              </div>
-            </div>
-          </button>
-
-          {/* Dark Theme Option Card */}
-          <button
-            type="button"
-            className={`appearance-card-option ${!currentLightMode ? 'is-selected' : ''}`}
-            onClick={() => handleSelectMode(false)}
-            role="radio"
-            aria-checked={!currentLightMode}
-            aria-label="Dark theme"
-          >
-            <div className="appearance-card-header">
-              <div className="appearance-icon-circle is-dark" aria-hidden="true">
-                <Moon size={22} strokeWidth={2.4} />
-              </div>
-              <div className="appearance-card-title-group">
-                <h3 className="appearance-card-title">Dark Theme</h3>
-                <span className="appearance-card-subtitle">Dark forest surfaces &amp; muted emerald</span>
-              </div>
-              <div className="themed-radio-outer" aria-hidden="true">
-                {!currentLightMode && <div className="themed-radio-inner" />}
-              </div>
-            </div>
-
-            {/* Visual Mini Mockup for Dark Theme */}
-            <div className="appearance-preview-mockup is-dark-mockup" aria-hidden="true">
-              <div className="mockup-topbar">
-                <span className="mockup-pill-logo" />
-                <span className="mockup-pill-btn" />
-              </div>
-              <div className="mockup-card">
-                <span className="mockup-line-primary" />
-                <span className="mockup-line-sub" />
-              </div>
-              <div className="mockup-item">
-                <span className="mockup-dot" />
-                <span className="mockup-text" />
-              </div>
-            </div>
-          </button>
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                className={`appearance-toggle-row ${isSelected ? 'is-selected' : ''}`}
+                onClick={() => handleSelectMode(opt.id)}
+                role="radio"
+                aria-checked={isSelected}
+                aria-label={opt.ariaLabel}
+              >
+                <div className={`appearance-toggle-icon-box is-${opt.id}`} aria-hidden="true">
+                  <Icon size={20} strokeWidth={2.2} />
+                </div>
+                <div className="appearance-toggle-copy">
+                  <strong className="appearance-toggle-title">{opt.title}</strong>
+                  <span className="appearance-toggle-subtitle">{opt.subtitle}</span>
+                </div>
+                <div className="themed-radio-outer" aria-hidden="true">
+                  {isSelected && <div className="themed-radio-inner" />}
+                </div>
+              </button>
+            );
+          })}
         </div>
-
-        <button
-          type="button"
-          className="primary-action full appearance-save-button"
-          onClick={() => handleSelectMode(currentLightMode)}
-        >
-          {currentLightMode ? 'Keep Light Theme' : 'Keep Dark Theme'}
-        </button>
 
         <StatusMessage type={status.type} message={status.message} />
       </section>

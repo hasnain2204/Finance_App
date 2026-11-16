@@ -206,17 +206,24 @@ describe('finance repository', () => {
 
     await expect(repository.deleteCategory('cat-food')).resolves.toBe(false);
     expect(database.categories.getRows()).toHaveLength(1);
+
+    // With fallbackCategoryId, it reassigns transactions and deletes the category
+    const generalSyncId = '10000000-0000-4000-8000-000000000099';
+    database.categories.add({ id: 'cat-general', syncId: generalSyncId, name: 'General', type: 'expense' });
+    await expect(repository.deleteCategory('cat-food', 'cat-general')).resolves.toBe(true);
+    expect(database.categories.getRows().some((c) => c.id === 'cat-food')).toBe(false);
+    expect(database.transactions.getRows()[0].categoryId).toBe('cat-general');
+
     const backup = JSON.parse(await repository.exportBackupPayload());
     expect(backup).toMatchObject({
       version: 4,
       transactions: [{
         id: 1,
         syncId: '30000000-0000-4000-8000-000000000001',
-        categoryId: 'cat-food',
-        categorySyncId,
+        categoryId: 'cat-general',
+        categorySyncId: generalSyncId,
         paymentMethodSyncId
       }],
-      categories: [{ id: 'cat-food', syncId: categorySyncId }],
       paymentMethods: [{ id: 'pm-cash', syncId: paymentMethodSyncId }],
       preferences: [{ id: 'app', syncId: '60000000-0000-4000-8000-000000000001' }]
     });

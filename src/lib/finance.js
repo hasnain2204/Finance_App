@@ -209,6 +209,143 @@ export function calculateCumulativeBudgetTotal(budgets = [], budgetHistory = [])
   return legacyBudgets + additions;
 }
 
+export function calculateHomeDisplayBudget(budgetHistory = [], budgets = [], remainingBudget = null) {
+  const sortedEntries = [...budgetHistory]
+    .filter((entry) => entry && entry.amount !== null && entry.amount !== undefined && !isNaN(Number(entry.amount)))
+    .sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.date ? new Date(`${a.date}T12:00:00`).getTime() : 0);
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.date ? new Date(`${b.date}T12:00:00`).getTime() : 0);
+      return timeB - timeA;
+    });
+
+  if (sortedEntries.length === 0) {
+    const hasOverall = budgets.some((b) => b.categoryId === 'overall');
+    if (!hasOverall) return null;
+    const overallBudget = budgets.find((b) => b.id === 'budget-all-overall' || b.categoryId === 'overall');
+    return overallBudget ? fromPaisa(Number(overallBudget.amount || 0)) : null;
+  }
+
+  // 1. Start with the latest budget
+  const latestAmount = fromPaisa(Number(sortedEntries[0].amount || 0));
+  let effectiveBudget = latestAmount;
+
+  // 2. If remaining budget is not set or <= latest budget, return latest updated budget
+  if (remainingBudget === null || remainingBudget === undefined || remainingBudget <= effectiveBudget) {
+    return effectiveBudget;
+  }
+
+  // 3. If remaining budget is greater than latest budget, add 2nd last, 3rd last, etc.
+  for (let i = 1; i < sortedEntries.length; i++) {
+    const prevAmount = fromPaisa(Number(sortedEntries[i].amount || 0));
+    effectiveBudget += prevAmount;
+    if (effectiveBudget >= remainingBudget) {
+      break;
+    }
+  }
+
+  // Ensure budget is always greater than or equal to remaining budget
+  if (effectiveBudget < remainingBudget) {
+    effectiveBudget = Math.max(effectiveBudget, remainingBudget);
+  }
+
+  return effectiveBudget;
+}
+
+export function calculateFinanceDashboard({
+  budgetHistory = [],
+  budgets = [],
+  transactions = [],
+  currentDate = new Date()
+} = {}) {
+  const dateObj = currentDate instanceof Date ? currentDate : new Date(currentDate);
+  const currentMonth = !Number.isNaN(dateObj.getTime())
+    ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`
+    : getLocalDateString().slice(0, 7);
+
+  // 1. Monthly expenses: strictly according to month (resets on 1st of every month)
+  const monthlyExpense = transactions
+    .filter((tx) => tx.type === 'expense' && tx.date?.startsWith(currentMonth))
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+  // 2. Budget history sorted newest first
+  const sortedEntries = [...budgetHistory]
+    .filter((entry) => entry && entry.amount !== null && entry.amount !== undefined && !isNaN(Number(entry.amount)))
+    .sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.date ? new Date(`${a.date}T12:00:00`).getTime() : 0);
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.date ? new Date(`${b.date}T12:00:00`).getTime() : 0);
+      return timeB - timeA;
+    });
+
+  const hasOverallBudget = budgets.some((b) => b.categoryId === 'overall') || sortedEntries.length > 0;
+  if (!hasOverallBudget && sortedEntries.length === 0) {
+    return {
+      displayedBudget: null,
+      remainingBudget: null,
+      monthlyExpense
+    };
+  }
+
+  if (sortedEntries.length === 0) {
+    const overallBudget = budgets.find((b) => b.id === 'budget-all-overall' || b.categoryId === 'overall');
+    const budgetAmount = overallBudget ? fromPaisa(Number(overallBudget.amount || 0)) : null;
+    return {
+      displayedBudget: budgetAmount,
+      remainingBudget: budgetAmount === null ? null : budgetAmount - monthlyExpense,
+      monthlyExpense
+    };
+  }
+
+  // Filter entries to current month if any exist; otherwise fall back to all entries
+  const currentMonthEntries = sortedEntries.filter((entry) => {
+    const entryMonth = entry.month || (entry.date ? entry.date.slice(0, 7) : '');
+    return entryMonth === currentMonth;
+  });
+
+  const activeEntries = currentMonthEntries.length > 0 ? currentMonthEntries : sortedEntries;
+
+  // Single entry case:
+  if (activeEntries.length === 1) {
+    const singleBudget = fromPaisa(Number(activeEntries[0].amount || 0));
+    return {
+      displayedBudget: singleBudget,
+      remainingBudget: singleBudget - monthlyExpense,
+      monthlyExpense
+    };
+  }
+
+  // Chronological order (oldest to newest) to trace baseline and remaining budget
+  const chronological = [...activeEntries].reverse();
+  const baselineBudget = fromPaisa(Number(chronological[0].amount || 0));
+  const remainingBudget = baselineBudget - monthlyExpense;
+
+  // Latest budget is activeEntries[0]
+  const latestBudget = fromPaisa(Number(activeEntries[0].amount || 0));
+  let displayedBudget = latestBudget;
+
+  // Mathematical and logical rule:
+  // If remaining budget is more than latest budget, add 2nd last budget in latest budget.
+  // If still greater than budget, add 3rd last budget in 2nd last and latest budget, etc.
+  // Budget should always be >= remaining budget.
+  if (remainingBudget > latestBudget) {
+    for (let i = 1; i < activeEntries.length; i++) {
+      const prevAmount = fromPaisa(Number(activeEntries[i].amount || 0));
+      displayedBudget += prevAmount;
+      if (displayedBudget >= remainingBudget) {
+        break;
+      }
+    }
+    if (displayedBudget < remainingBudget) {
+      displayedBudget = remainingBudget;
+    }
+  }
+
+  return {
+    displayedBudget,
+    remainingBudget,
+    monthlyExpense
+  };
+}
+
 export function calculateCategoryExpenseTotals(transactions = [], month) {
   return transactions.reduce((totals, tx) => {
     if (tx.type !== 'expense' || (month && !tx.date?.startsWith(month))) return totals;

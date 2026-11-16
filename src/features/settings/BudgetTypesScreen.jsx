@@ -17,7 +17,8 @@ export function BudgetTypesScreen({
   onDelete,
   onBack,
   defaultBudgetTypeId,
-  onSelectDefault
+  onSelectDefault,
+  onReorder
 }) {
   return (
     <NamedEntityManager
@@ -41,10 +42,10 @@ export function BudgetTypesScreen({
       onCancelDelete={() => setBudgetTypeToDelete(null)}
       onConfirmDelete={onDelete}
       deleteTitleId="delete-budget-type-title"
-      deleteTitle="Remove Budget Type?"
+      deleteTitle="Delete Budget Type?"
       deleteDescription={
         budgetTypeToDelete
-          ? `Remove “${budgetTypeToDelete.name}” from your budget types? Budget types used by existing budgets cannot be removed.`
+          ? `Delete “${budgetTypeToDelete.name}”? Any budgets using this budget type will be changed to General.`
           : ''
       }
       nameLabel="Budget Type Name"
@@ -62,6 +63,7 @@ export function BudgetTypesScreen({
       defaultItemId={defaultBudgetTypeId}
       onSelectDefault={onSelectDefault}
       defaultLabel="Default Budget Type"
+      onReorder={onReorder}
     />
   );
 }

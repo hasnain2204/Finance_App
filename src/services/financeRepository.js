@@ -370,7 +370,7 @@ export function createFinanceRepository(database, seed) {
       });
     },
 
-    async deleteCategory(id) {
+    async deleteCategory(id, fallbackCategoryId = null) {
       return database.transaction(
         'rw',
         database.categories,
@@ -379,12 +379,48 @@ export function createFinanceRepository(database, seed) {
         database.budgets,
         ...syncTransactionTables(database),
         async () => {
-          const [transaction, historyEntry, budget] = await Promise.all([
-            database.transactions.where('categoryId').equals(id).first(),
-            database.budgetHistory.where('categoryId').equals(id).first(),
-            database.budgets.where('categoryId').equals(id).first()
-          ]);
-          if (transaction || historyEntry || budget) return false;
+          if (fallbackCategoryId && fallbackCategoryId !== id) {
+            const fallbackCategory = await database.categories.get(fallbackCategoryId);
+            const fallbackSyncId = fallbackCategory?.syncId || null;
+
+            const [txs, entries, existingBudgets] = await Promise.all([
+              database.transactions.where('categoryId').equals(id).toArray(),
+              database.budgetHistory.where('categoryId').equals(id).toArray(),
+              database.budgets.where('categoryId').equals(id).toArray()
+            ]);
+
+            for (const tx of txs) {
+              const updatedTx = { ...tx, categoryId: fallbackCategoryId, categorySyncId: fallbackSyncId };
+              await database.transactions.put(updatedTx);
+              await enqueueLocalMutation(database, {
+                collection: 'transactions', operation: 'upsert', record: updatedTx
+              });
+            }
+
+            for (const entry of entries) {
+              const updatedEntry = { ...entry, categoryId: fallbackCategoryId, categorySyncId: fallbackSyncId };
+              await database.budgetHistory.put(updatedEntry);
+              await enqueueLocalMutation(database, {
+                collection: 'budgetHistory', operation: 'upsert', record: updatedEntry
+              });
+            }
+
+            for (const b of existingBudgets) {
+              const updatedB = { ...b, categoryId: fallbackCategoryId, categorySyncId: fallbackSyncId };
+              await database.budgets.put(updatedB);
+              await enqueueLocalMutation(database, {
+                collection: 'budgets', operation: 'upsert', record: updatedB
+              });
+            }
+          } else {
+            const [transaction, historyEntry, budget] = await Promise.all([
+              database.transactions.where('categoryId').equals(id).first(),
+              database.budgetHistory.where('categoryId').equals(id).first(),
+              database.budgets.where('categoryId').equals(id).first()
+            ]);
+            if (transaction || historyEntry || budget) return false;
+          }
+
           const category = await database.categories.get(id);
           if (category) await enqueueLocalMutation(database, {
             collection: 'categories', operation: 'delete', record: category
@@ -420,17 +456,45 @@ export function createFinanceRepository(database, seed) {
       });
     },
 
-    async deletePaymentMethod(id) {
+    async deletePaymentMethod(id, fallbackPaymentMethodId = null) {
       return database.transaction('rw', database.paymentMethods, database.transactions,
         ...syncTransactionTables(database), async () => {
-        const transaction = await database.transactions.where('paymentMethodId').equals(id).first();
-        if (transaction) return false;
+        if (fallbackPaymentMethodId && fallbackPaymentMethodId !== id) {
+          const fallbackPm = await database.paymentMethods.get(fallbackPaymentMethodId);
+          const fallbackSyncId = fallbackPm?.syncId || null;
+          const txs = await database.transactions.where('paymentMethodId').equals(id).toArray();
+          for (const tx of txs) {
+            const updatedTx = { ...tx, paymentMethodId: fallbackPaymentMethodId, paymentMethodSyncId: fallbackSyncId };
+            await database.transactions.put(updatedTx);
+            await enqueueLocalMutation(database, {
+              collection: 'transactions', operation: 'upsert', record: updatedTx
+            });
+          }
+        } else {
+          const transaction = await database.transactions.where('paymentMethodId').equals(id).first();
+          if (transaction) return false;
+        }
         const paymentMethod = await database.paymentMethods.get(id);
         if (paymentMethod) await enqueueLocalMutation(database, {
           collection: 'paymentMethods', operation: 'delete', record: paymentMethod
         });
         await database.paymentMethods.delete(id);
         return true;
+      });
+    },
+
+    async reassignBudgetCategory(oldName, newName = 'General') {
+      return database.transaction('rw', database.budgetHistory, ...syncTransactionTables(database), async () => {
+        const entries = await database.budgetHistory.toArray();
+        const matching = entries.filter((entry) => entry.budgetCategory === oldName);
+        for (const entry of matching) {
+          const updated = { ...entry, budgetCategory: newName };
+          await database.budgetHistory.put(updated);
+          await enqueueLocalMutation(database, {
+            collection: 'budgetHistory', operation: 'upsert', record: updated
+          });
+        }
+        return matching.length;
       });
     },
 

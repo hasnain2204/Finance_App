@@ -207,6 +207,54 @@ export function useFinanceSync(repository, auth) {
     return () => window.clearTimeout(timer);
   }, [auth?.user?.id, service, status.status, syncEnabled, syncNow]);
 
+  // 30s-60s debounced auto-sync after any transaction or data change
+  useEffect(() => {
+    const accountUserId = auth?.user?.id;
+    if (!accountUserId || auth?.loading || syncPreferenceLoading || !syncEnabled) {
+      return undefined;
+    }
+
+    let debounceTimer = null;
+    let maxWaitTimer = null;
+
+    const triggerSync = async () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (maxWaitTimer) clearTimeout(maxWaitTimer);
+      debounceTimer = null;
+      maxWaitTimer = null;
+
+      if (!globalThis.navigator?.onLine) return;
+
+      try {
+        const database = getDatabase();
+        if (!database) return;
+        if (await getSyncMetadata(database, 'initialSyncConfirmed') === true) {
+          await service.syncNow(accountUserId);
+          await refresh();
+        }
+      } catch (_) {
+        // Silent catch for background auto-sync
+      }
+    };
+
+    const handleMutation = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(triggerSync, 30000);
+
+      if (!maxWaitTimer) {
+        maxWaitTimer = setTimeout(triggerSync, 60000);
+      }
+    };
+
+    window.addEventListener('finance:mutation', handleMutation);
+
+    return () => {
+      window.removeEventListener('finance:mutation', handleMutation);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (maxWaitTimer) clearTimeout(maxWaitTimer);
+    };
+  }, [auth?.loading, auth?.user?.id, getDatabase, refresh, service, syncEnabled, syncPreferenceLoading]);
+
   // Periodic 30-second auto-sync: when Cloud Sync is enabled, automatically check outbox every 30s
   // and sync if any pending transactions or mutations have been queued.
   useEffect(() => {

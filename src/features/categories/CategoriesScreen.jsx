@@ -17,7 +17,8 @@ export function CategoriesScreen({
   onDelete,
   onBack,
   defaultCategoryId,
-  onSelectDefault
+  onSelectDefault,
+  onReorder
 }) {
   return (
     <NamedEntityManager
@@ -41,10 +42,10 @@ export function CategoriesScreen({
       onCancelDelete={() => setCategoryToDelete(null)}
       onConfirmDelete={onDelete}
       deleteTitleId="delete-category-title"
-      deleteTitle="Remove Category?"
+      deleteTitle="Delete Category?"
       deleteDescription={
         categoryToDelete
-          ? `Remove “${categoryToDelete.name}” from your categories? Categories used by existing expenses or budgets cannot be removed.`
+          ? `Delete “${categoryToDelete.name}”? Any transactions or budgets using this category will be changed to General.`
           : ''
       }
       nameLabel="Category Name"
@@ -62,6 +63,7 @@ export function CategoriesScreen({
       defaultItemId={defaultCategoryId}
       onSelectDefault={onSelectDefault}
       defaultLabel="Default Category"
+      onReorder={onReorder}
     />
   );
 }

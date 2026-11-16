@@ -100,4 +100,36 @@ describe('finance sync lifecycle triggers', () => {
     );
     unmount();
   });
+
+  it('automatically triggers debounced sync when finance:mutation event is dispatched', async () => {
+    const repository = makeRepository();
+    const auth = { loading: false, user: { id: userId } };
+    const { unmount } = renderHook(() => useFinanceSync(repository, auth));
+
+    await waitFor(() => expect(service.syncNow).toHaveBeenCalledTimes(1));
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('finance:mutation', {
+          detail: { collection: 'transactions', operation: 'upsert' }
+        }));
+      });
+
+      // 15 seconds passed: not triggered yet (debounced to 30s)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15000);
+      });
+      expect(service.syncNow).toHaveBeenCalledTimes(1);
+
+      // 16 more seconds passed (31s total): debounced timer fires!
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16000);
+      });
+      expect(service.syncNow).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      unmount();
+    }
+  });
 });

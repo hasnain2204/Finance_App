@@ -1,4 +1,4 @@
-import { Cloud, ShieldCheck } from 'lucide-react';
+import { Cloud, RotateCw, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { BackHeader } from '../../components/ui';
 
@@ -35,8 +35,26 @@ export function CloudSyncScreen({ onBack, auth, sync, onOpenCloudAccount, onTogg
 
         <section className="cloud-sync-card" aria-labelledby="cloud-sync-title">
           <div className="cloud-sync-heading">
-            <Cloud size={20} aria-hidden="true" />
-            <h2 id="cloud-sync-title">Cloud Sync</h2>
+            <div className="cloud-sync-title-group">
+              <Cloud size={20} aria-hidden="true" />
+              <h2 id="cloud-sync-title">Cloud Sync</h2>
+            </div>
+            {connectedEmail && enabled ? (
+              <button
+                type="button"
+                className={`sync-icon-button ${sync?.busy ? 'is-spinning' : ''}`}
+                onClick={async () => {
+                  if (sync?.syncNow && !sync.busy) {
+                    await sync.syncNow();
+                  }
+                }}
+                disabled={sync?.busy || !sync?.syncEnabled}
+                aria-label={sync?.busy ? 'Syncing…' : 'Sync now'}
+                title={sync?.busy ? 'Syncing…' : 'Sync now'}
+              >
+                <RotateCw size={17} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
           {auth?.loading ? (
             <p className="cloud-sync-account" role="status">Checking this device for a saved account…</p>

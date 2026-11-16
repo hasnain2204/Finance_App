@@ -544,6 +544,18 @@ export function createFinanceSyncService({
             (response.record.sync_id !== entry.syncId && !identityCollisionAllowed)) {
             throw new Error('The server conflict response did not match the signed-in owner and expected stable identity.');
           }
+          if (wireRecordsEqual(entry.collection, entry.payload, response.record)) {
+            await setEntityState(entry.collection, response.record.sync_id, response.record);
+            await database.syncOutbox.update(entry.id, {
+              status: 'synced',
+              baseRevision: Number(response.record.revision),
+              nextAttemptAt: null,
+              lastError: null,
+              updatedAt: now().toISOString()
+            });
+            result.pushed += 1;
+            continue;
+          }
           await createConflict({
             collection: entry.collection,
             syncId: entry.syncId,
@@ -637,10 +649,51 @@ export function createFinanceSyncService({
     return { preview, ...(await syncNow(userId)) };
   };
 
+  const autoResolveConflict = async (conflict, userId) => {
+    if (!conflict || conflict.status !== 'unresolved' || conflict.ownerUserId !== userId) return;
+    if (conflict.remotePayload?.deleted_at) {
+      await syncTransaction(async () => {
+        await applyResolvedRemote(conflict, userId);
+        await database.syncConflicts.update(conflict.id, {
+          status: 'resolved-remote',
+          resolvedAt: now().toISOString()
+        });
+      });
+      return;
+    }
+    const localUpdatedAt = conflict.localPayload?.updatedAt || conflict.localPayload?.createdAt || 0;
+    const remoteUpdatedAt = conflict.remotePayload?.updated_at || conflict.remotePayload?.created_at || 0;
+    const localTime = new Date(localUpdatedAt).getTime();
+    const remoteTime = new Date(remoteUpdatedAt).getTime();
+
+    // If remote is strictly newer and local was an unmodified initial snapshot:
+    if (remoteTime > localTime && (!localUpdatedAt || conflict.baseRevision == null)) {
+      await syncTransaction(async () => {
+        await applyResolvedRemote(conflict, userId);
+        await database.syncConflicts.update(conflict.id, {
+          status: 'resolved-remote',
+          resolvedAt: now().toISOString()
+        });
+      });
+      return;
+    }
+
+    // Default to keeping local changes, aligning baseRevision to remote revision
+    await resolveConflict(conflict.id, 'local', userId);
+  };
+
   const syncNow = async (userId) => {
     await assertOwner(userId);
     if (!isOnline()) throw new Error('You are offline. Local changes are saved and will sync after reconnecting.');
     await recoverInterrupted();
+    const conflicts = await database.syncConflicts.toArray();
+    for (const conflict of conflicts.filter((c) => c.status === 'unresolved' && c.ownerUserId === userId)) {
+      try {
+        await autoResolveConflict(conflict, userId);
+      } catch (_) {
+        // Continue
+      }
+    }
     const pull = await pullChanges(userId);
     const push = await pushPending(userId);
     return { pull, push, status: await getStatus({ userId }) };
@@ -649,8 +702,24 @@ export function createFinanceSyncService({
   const retryFailed = async (userId) => {
     await assertOwner(userId);
     const entries = await database.syncOutbox.toArray();
-    for (const entry of entries.filter((item) => item.ownerUserId === userId && item.status === 'error')) {
-      await database.syncOutbox.update(entry.id, { status: 'pending', nextAttemptAt: null, updatedAt: now().toISOString() });
+    for (const entry of entries.filter((item) => item.ownerUserId === userId && (item.status === 'error' || item.status === 'conflict'))) {
+      const state = await database.syncEntityState.get(getSyncEntityStateId(entry.collection, entry.syncId));
+      await database.syncOutbox.update(entry.id, {
+        status: 'pending',
+        baseRevision: state?.revision ?? entry.baseRevision ?? null,
+        attempts: 0,
+        nextAttemptAt: null,
+        lastError: null,
+        updatedAt: now().toISOString()
+      });
+    }
+    const conflicts = await database.syncConflicts.toArray();
+    for (const conflict of conflicts.filter((c) => c.status === 'unresolved' && c.ownerUserId === userId)) {
+      try {
+        await autoResolveConflict(conflict, userId);
+      } catch (_) {
+        // Continue
+      }
     }
     return syncNow(userId);
   };
@@ -736,6 +805,7 @@ export function createFinanceSyncService({
     retryFailed,
     getStatus,
     resolveConflict,
+    autoResolveConflict,
     getConflicts: () => database.syncConflicts.toArray(),
     getOutbox: () => database.syncOutbox.toArray()
   };

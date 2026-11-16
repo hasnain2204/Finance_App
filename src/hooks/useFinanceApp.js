@@ -8,6 +8,7 @@ import {
   calculateCumulativeBudgetTotal,
   calculateCategoryExpenseTotals,
   calculateExpenseTotal,
+  calculateFinanceDashboard,
   dateFormatOptions,
   formatDate,
   fromPaisa,
@@ -76,8 +77,8 @@ export function useFinanceApp(repository = financeRepository) {
   const [paymentMethodToDelete, setPaymentMethodToDelete] = useState(null);
   const [showAddPaymentMethodForm, setShowAddPaymentMethodForm] = useState(false);
   const [budgetTypes, setBudgetTypes] = useState(defaultBudgetTypes);
-  const [selectedBudgetTypeId, setSelectedBudgetTypeId] = useState(defaultBudgetTypes[0].id);
-  const [budgetTypeNameDraft, setBudgetTypeNameDraft] = useState(defaultBudgetTypes[0].name);
+  const [selectedBudgetTypeId, setSelectedBudgetTypeId] = useState(null);
+  const [budgetTypeNameDraft, setBudgetTypeNameDraft] = useState('');
   const [budgetTypeEditStatus, setBudgetTypeEditStatus] = useState({ type: 'idle', message: '' });
   const [budgetTypeInput, setBudgetTypeInput] = useState('');
   const [budgetTypeToDelete, setBudgetTypeToDelete] = useState(null);
@@ -104,6 +105,15 @@ export function useFinanceApp(repository = financeRepository) {
     [transactions]
   );
 
+  const dashboardFinance = useMemo(() => {
+    return calculateFinanceDashboard({
+      budgetHistory,
+      budgets,
+      transactions,
+      currentDate: new Date()
+    });
+  }, [budgetHistory, budgets, transactions]);
+
   const totalBudgetPaisa = useMemo(() => {
     return calculateCumulativeBudgetTotal(budgets, budgetHistory);
   }, [budgets, budgetHistory]);
@@ -124,9 +134,9 @@ export function useFinanceApp(repository = financeRepository) {
   const weeklySpending = useMemo(() => {
     return buildWeeklyBudgetTrend(
       transactions,
-      budgets.some((budget) => budget.categoryId === 'overall') ? fromPaisa(totalBudgetPaisa) : null
+      dashboardFinance.displayedBudget ?? (budgets.some((budget) => budget.categoryId === 'overall') ? fromPaisa(totalBudgetPaisa) : null)
     );
-  }, [transactions, budgets, totalBudgetPaisa]);
+  }, [transactions, budgets, totalBudgetPaisa, dashboardFinance.displayedBudget]);
 
   const categoryTotals = useMemo(() => {
     const totalsByCategory = calculateCategoryExpenseTotals(transactions, getLocalDateString().slice(0, 7));
@@ -173,14 +183,30 @@ export function useFinanceApp(repository = financeRepository) {
 
       setTransactions(allTx.filter((tx) => tx.type === 'expense').map((tx) => ({ ...tx, amount: fromPaisa(Number(tx.amount || 0)) })));
       setBudgetHistory(allBudgetHistory);
-      setCategories(allCategories.filter((category) => category.type === 'expense'));
-      setPaymentMethods(allMethods.length ? allMethods : defaultPaymentMethods);
+      let loadedCategories = allCategories.filter((category) => category.type === 'expense');
+      if (Array.isArray(appPreferences?.categoryOrder) && appPreferences.categoryOrder.length > 0) {
+        const orderMap = new Map(appPreferences.categoryOrder.map((id, index) => [id, index]));
+        loadedCategories.sort((a, b) => {
+          const orderA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+          const orderB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+          return orderA - orderB;
+        });
+      }
+      setCategories(loadedCategories);
+
+      let loadedMethods = allMethods.length ? allMethods : defaultPaymentMethods;
+      if (Array.isArray(appPreferences?.paymentMethodOrder) && appPreferences.paymentMethodOrder.length > 0) {
+        const orderMap = new Map(appPreferences.paymentMethodOrder.map((id, index) => [id, index]));
+        loadedMethods.sort((a, b) => {
+          const orderA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+          const orderB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+          return orderA - orderB;
+        });
+      }
+      setPaymentMethods(loadedMethods);
+
       if (Array.isArray(appPreferences?.budgetTypes) && appPreferences.budgetTypes.length > 0) {
         setBudgetTypes(appPreferences.budgetTypes);
-        const defId = appPreferences.defaultBudgetTypeId || appPreferences.budgetTypes[0].id;
-        setSelectedBudgetTypeId(defId);
-        const defItem = appPreferences.budgetTypes.find((b) => b.id === defId) || appPreferences.budgetTypes[0];
-        setBudgetTypeNameDraft(defItem.name);
       }
       setBudgets(allBudgets);
       const loadedPrefs = {
@@ -275,10 +301,16 @@ export function useFinanceApp(repository = financeRepository) {
     }
   };
 
-  const handleSaveAppearance = async (isLightMode) => {
+  const handleSaveAppearance = async (themeMode) => {
+    const isSystem = themeMode === 'system';
+    const isDark = themeMode === 'dark' || themeMode === false;
+    const isLight = isSystem ? null : (themeMode === 'light' || themeMode === true);
+    const resolvedTheme = isSystem ? 'system' : (isDark ? 'dark' : 'light');
+
     const nextPreferences = {
       ...(preferences || { id: 'app', currency: 'PKR', dateFormat: 'DD MMM YYYY' }),
-      lightMode: Boolean(isLightMode)
+      theme: resolvedTheme,
+      lightMode: isLight
     };
     try {
       await repository.savePreferences(nextPreferences);
@@ -468,10 +500,19 @@ export function useFinanceApp(repository = financeRepository) {
     const category = { id: `cat-${Date.now()}`, name: trimmed, type: 'expense' };
     try {
       await repository.createCategory(category);
-      setCategories((current) => [...current, category]);
+      const nextCategories = [...categories, category];
+      setCategories(nextCategories);
       setCategoryInput('');
       setShowAddCategoryForm(false);
       setCategoryEditStatus({ type: 'success', message: 'Category added.' });
+      if (preferences?.categoryOrder) {
+        const nextPreferences = {
+          ...preferences,
+          categoryOrder: nextCategories.map((c) => c.id)
+        };
+        await repository.savePreferences(nextPreferences);
+        setPreferences(nextPreferences);
+      }
     } catch (error) {
       setCategoryEditStatus({ type: 'error', message: 'Could not add the category. Please try again.' });
     }
@@ -494,18 +535,27 @@ export function useFinanceApp(repository = financeRepository) {
     };
     try {
       await repository.createPaymentMethod(method);
-      setPaymentMethods((current) => [...current, method].sort((a, b) => a.name.localeCompare(b.name)));
+      const nextMethods = [...paymentMethods, method];
+      setPaymentMethods(nextMethods);
       setSelectedPaymentMethodId(method.id);
       setPaymentMethodNameDraft(method.name);
       setMethodInput('');
       setShowAddPaymentMethodForm(false);
       setPaymentMethodEditStatus({ type: 'success', message: 'Payment method added.' });
+      if (preferences?.paymentMethodOrder) {
+        const nextPreferences = {
+          ...preferences,
+          paymentMethodOrder: nextMethods.map((m) => m.id)
+        };
+        await repository.savePreferences(nextPreferences);
+        setPreferences(nextPreferences);
+      }
     } catch (error) {
       setPaymentMethodEditStatus({ type: 'error', message: 'Could not add the payment method. Please try again.' });
     }
   };
 
-  const openAccount = (category = categories[0]) => {
+  const openAccount = (category = null) => {
     setSelectedCategoryId(category?.id || null);
     setCategoryNameDraft(category?.name || '');
     setShowAddCategoryForm(false);
@@ -513,7 +563,7 @@ export function useFinanceApp(repository = financeRepository) {
     setTab('account');
   };
 
-  const openPaymentMethods = (method = paymentMethods[0]) => {
+  const openPaymentMethods = (method = null) => {
     setSelectedPaymentMethodId(method?.id || null);
     setPaymentMethodNameDraft(method?.name || '');
     setShowAddPaymentMethodForm(false);
@@ -550,8 +600,9 @@ export function useFinanceApp(repository = financeRepository) {
         return;
       }
       setPaymentMethods((current) => current
-        .map((method) => method.id === selectedPaymentMethodId ? { ...method, name: methodName } : method)
-        .sort((a, b) => a.name.localeCompare(b.name)));
+        .map((method) => method.id === selectedPaymentMethodId ? { ...method, name: methodName } : method));
+      setSelectedPaymentMethodId(null);
+      setPaymentMethodNameDraft('');
       setPaymentMethodEditStatus({ type: 'success', message: 'Payment method updated.' });
     } catch (error) {
       setPaymentMethodEditStatus({ type: 'error', message: 'Could not update the payment method. Please try again.' });
@@ -583,25 +634,59 @@ export function useFinanceApp(repository = financeRepository) {
     }
 
     try {
-      const isInUse = !await repository.deletePaymentMethod(paymentMethodToDelete.id);
+      let generalMethod = paymentMethods.find((m) => m.name.toLowerCase() === 'general');
+      let updatedMethodsList = [...paymentMethods];
 
-      if (isInUse) {
-        setPaymentMethodEditStatus({
-          type: 'error',
-          message: 'This payment method is used by existing transactions and cannot be removed.'
-        });
-        setPaymentMethodToDelete(null);
-        return;
+      if (!generalMethod) {
+        if (paymentMethodToDelete.name.toLowerCase() !== 'general') {
+          generalMethod = {
+            id: 'pm-general',
+            name: 'General'
+          };
+          await repository.createPaymentMethod(generalMethod);
+          updatedMethodsList.push(generalMethod);
+        } else {
+          generalMethod = paymentMethods.find((m) => m.id !== paymentMethodToDelete.id);
+        }
       }
 
-      const remainingMethods = paymentMethods.filter((method) => method.id !== paymentMethodToDelete.id);
+      await repository.deletePaymentMethod(paymentMethodToDelete.id, generalMethod.id);
+
+      setTransactions((current) => current.map((tx) => (
+        tx.paymentMethodId === paymentMethodToDelete.id
+          ? { ...tx, paymentMethodId: generalMethod.id, paymentMethodName: generalMethod.name }
+          : tx
+      )));
+
+      const remainingMethods = updatedMethodsList.filter((method) => method.id !== paymentMethodToDelete.id);
       setPaymentMethods(remainingMethods);
+
       if (selectedPaymentMethodId === paymentMethodToDelete.id) {
-        const nextMethod = remainingMethods[0];
-        setSelectedPaymentMethodId(nextMethod?.id || null);
-        setPaymentMethodNameDraft(nextMethod?.name || '');
+        setSelectedPaymentMethodId(null);
+        setPaymentMethodNameDraft('');
       }
-      setPaymentMethodEditStatus({ type: 'success', message: 'Payment method removed.' });
+
+      if (preferences?.defaultPaymentMethodId === paymentMethodToDelete.id) {
+        const nextPreferences = {
+          ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+          defaultPaymentMethodId: generalMethod.id,
+          paymentMethodOrder: remainingMethods.map((m) => m.id)
+        };
+        await repository.savePreferences(nextPreferences);
+        setPreferences(nextPreferences);
+      } else if (preferences?.paymentMethodOrder) {
+        const nextPreferences = {
+          ...preferences,
+          paymentMethodOrder: remainingMethods.map((m) => m.id)
+        };
+        await repository.savePreferences(nextPreferences);
+        setPreferences(nextPreferences);
+      }
+
+      setPaymentMethodEditStatus({
+        type: 'success',
+        message: `Payment method deleted. Transactions using it were moved to ${generalMethod.name}.`
+      });
       setPaymentMethodToDelete(null);
     } catch (error) {
       setPaymentMethodEditStatus({ type: 'error', message: 'Could not remove the payment method. Please try again.' });
@@ -639,6 +724,8 @@ export function useFinanceApp(repository = financeRepository) {
       setCategories((current) => current.map((category) => (
         category.id === selectedCategoryId ? { ...category, name: categoryName } : category
       )));
+      setSelectedCategoryId(null);
+      setCategoryNameDraft('');
       setCategoryEditStatus({ type: 'success', message: 'Category updated.' });
     } catch (error) {
       setCategoryEditStatus({ type: 'error', message: 'Could not update the category. Please try again.' });
@@ -670,25 +757,72 @@ export function useFinanceApp(repository = financeRepository) {
     }
 
     try {
-      const isInUse = !await repository.deleteCategory(categoryToDelete.id);
+      let generalCategory = categories.find((c) => c.name.toLowerCase() === 'general');
+      let updatedCategoriesList = [...categories];
 
-      if (isInUse) {
-        setCategoryEditStatus({
-          type: 'error',
-          message: 'This category is used by existing records and cannot be removed.'
-        });
-        setCategoryToDelete(null);
-        return;
+      if (!generalCategory) {
+        if (categoryToDelete.name.toLowerCase() !== 'general') {
+          generalCategory = {
+            id: 'cat-general',
+            name: 'General',
+            type: 'expense'
+          };
+          await repository.createCategory(generalCategory);
+          updatedCategoriesList.push(generalCategory);
+        } else {
+          generalCategory = categories.find((c) => c.id !== categoryToDelete.id);
+        }
       }
 
-      const remainingCategories = categories.filter((category) => category.id !== categoryToDelete.id);
+      await repository.deleteCategory(categoryToDelete.id, generalCategory.id);
+
+      setTransactions((current) => current.map((tx) => (
+        tx.categoryId === categoryToDelete.id
+          ? { ...tx, categoryId: generalCategory.id, categoryName: generalCategory.name }
+          : tx
+      )));
+
+      setBudgetHistory((current) => current.map((entry) => (
+        entry.categoryId === categoryToDelete.id
+          ? { ...entry, categoryId: generalCategory.id }
+          : entry
+      )));
+
+      setBudgets((current) => current.map((b) => (
+        b.categoryId === categoryToDelete.id
+          ? { ...b, categoryId: generalCategory.id }
+          : b
+      )));
+
+      const remainingCategories = updatedCategoriesList.filter((category) => category.id !== categoryToDelete.id);
       setCategories(remainingCategories);
+
       if (selectedCategoryId === categoryToDelete.id) {
-        const nextCategory = remainingCategories[0];
-        setSelectedCategoryId(nextCategory?.id || null);
-        setCategoryNameDraft(nextCategory?.name || '');
+        setSelectedCategoryId(null);
+        setCategoryNameDraft('');
       }
-      setCategoryEditStatus({ type: 'success', message: 'Category removed.' });
+
+      if (preferences?.defaultCategoryId === categoryToDelete.id) {
+        const nextPreferences = {
+          ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+          defaultCategoryId: generalCategory.id,
+          categoryOrder: remainingCategories.map((c) => c.id)
+        };
+        await repository.savePreferences(nextPreferences);
+        setPreferences(nextPreferences);
+      } else if (preferences?.categoryOrder) {
+        const nextPreferences = {
+          ...preferences,
+          categoryOrder: remainingCategories.map((c) => c.id)
+        };
+        await repository.savePreferences(nextPreferences);
+        setPreferences(nextPreferences);
+      }
+
+      setCategoryEditStatus({
+        type: 'success',
+        message: `Category deleted. Transactions using it were moved to ${generalCategory.name}.`
+      });
       setCategoryToDelete(null);
     } catch (error) {
       setCategoryEditStatus({ type: 'error', message: 'Could not remove the category. Please try again.' });
@@ -696,7 +830,7 @@ export function useFinanceApp(repository = financeRepository) {
     }
   };
 
-  const openBudgetTypes = (type = budgetTypes[0]) => {
+  const openBudgetTypes = (type = null) => {
     setSelectedBudgetTypeId(type?.id || null);
     setBudgetTypeNameDraft(type?.name || '');
     setBudgetTypeInput('');
@@ -774,6 +908,8 @@ export function useFinanceApp(repository = financeRepository) {
       if (budgetForm.budgetCategory === oldName) {
         setBudgetForm((current) => ({ ...current, budgetCategory: typeName }));
       }
+      setSelectedBudgetTypeId(null);
+      setBudgetTypeNameDraft('');
       setBudgetTypeEditStatus({ type: 'success', message: 'Budget type updated.' });
     } catch (error) {
       setBudgetTypeEditStatus({ type: 'error', message: 'Could not update budget type. Please try again.' });
@@ -808,39 +944,105 @@ export function useFinanceApp(repository = financeRepository) {
       return;
     }
 
-    const isUsed = budgetHistory.some(
-      (entry) => entry.budgetCategory === budgetTypeToDelete.name
-    );
-    if (isUsed) {
-      setBudgetTypeEditStatus({
-        type: 'error',
-        message: 'This budget type is used by existing budgets and cannot be removed.'
-      });
-      setBudgetTypeToDelete(null);
-      return;
-    }
-
-    const nextList = budgetTypes.filter((bt) => bt.id !== budgetTypeToDelete.id);
-    const nextPreferences = {
-      ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
-      budgetTypes: nextList,
-      defaultBudgetTypeId: preferences?.defaultBudgetTypeId === budgetTypeToDelete.id
-        ? nextList[0].id
-        : preferences?.defaultBudgetTypeId
-    };
-
     try {
+      let generalBudgetType = budgetTypes.find((bt) => bt.name.toLowerCase() === 'general');
+      let updatedBudgetTypes = [...budgetTypes];
+
+      if (!generalBudgetType) {
+        if (budgetTypeToDelete.name.toLowerCase() !== 'general') {
+          generalBudgetType = {
+            id: 'bt-general',
+            name: 'General'
+          };
+          updatedBudgetTypes.push(generalBudgetType);
+        } else {
+          generalBudgetType = budgetTypes.find((bt) => bt.id !== budgetTypeToDelete.id);
+        }
+      }
+
+      if (repository.reassignBudgetCategory) {
+        await repository.reassignBudgetCategory(budgetTypeToDelete.name, generalBudgetType.name);
+      }
+
+      setBudgetHistory((current) => current.map((entry) => (
+        entry.budgetCategory === budgetTypeToDelete.name
+          ? { ...entry, budgetCategory: generalBudgetType.name }
+          : entry
+      )));
+
+      if (budgetForm.budgetCategory === budgetTypeToDelete.name) {
+        setBudgetForm((current) => ({ ...current, budgetCategory: generalBudgetType.name }));
+      }
+
+      const nextList = updatedBudgetTypes.filter((bt) => bt.id !== budgetTypeToDelete.id);
+      setBudgetTypes(nextList);
+
+      const nextPreferences = {
+        ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+        budgetTypes: nextList,
+        defaultBudgetTypeId: preferences?.defaultBudgetTypeId === budgetTypeToDelete.id
+          ? generalBudgetType.id
+          : preferences?.defaultBudgetTypeId
+      };
+
       await repository.savePreferences(nextPreferences);
       setPreferences(nextPreferences);
-      setBudgetTypes(nextList);
-      const nextSelected = nextList[0];
-      setSelectedBudgetTypeId(nextSelected.id);
-      setBudgetTypeNameDraft(nextSelected.name);
+
+      if (selectedBudgetTypeId === budgetTypeToDelete.id) {
+        setSelectedBudgetTypeId(null);
+        setBudgetTypeNameDraft('');
+      }
+
+      setBudgetTypeEditStatus({
+        type: 'success',
+        message: `Budget type deleted. Associated budgets were moved to ${generalBudgetType.name}.`
+      });
       setBudgetTypeToDelete(null);
-      setBudgetTypeEditStatus({ type: 'success', message: 'Budget type removed.' });
     } catch (error) {
       setBudgetTypeEditStatus({ type: 'error', message: 'Could not remove budget type. Please try again.' });
       setBudgetTypeToDelete(null);
+    }
+  };
+
+  const handleReorderCategories = async (newOrder) => {
+    setCategories(newOrder);
+    try {
+      const nextPreferences = {
+        ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+        categoryOrder: newOrder.map((c) => c.id)
+      };
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+    } catch (error) {
+      console.error('Failed to save category order', error);
+    }
+  };
+
+  const handleReorderPaymentMethods = async (newOrder) => {
+    setPaymentMethods(newOrder);
+    try {
+      const nextPreferences = {
+        ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+        paymentMethodOrder: newOrder.map((m) => m.id)
+      };
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+    } catch (error) {
+      console.error('Failed to save payment method order', error);
+    }
+  };
+
+  const handleReorderBudgetTypes = async (newOrder) => {
+    setBudgetTypes(newOrder);
+    try {
+      const nextPreferences = {
+        ...(preferences || { id: 'app', lightMode: true, currency: 'PKR' }),
+        budgetTypes: newOrder
+      };
+      await repository.savePreferences(nextPreferences);
+      setPreferences(nextPreferences);
+    } catch (error) {
+      console.error('Failed to save budget types order', error);
     }
   };
 
@@ -1076,6 +1278,9 @@ export function useFinanceApp(repository = financeRepository) {
     budgets,
     setBudgets,
     totalBudgetPaisa,
+    dashboardFinance,
+    displayedBudget: dashboardFinance.displayedBudget,
+    availableBalance: dashboardFinance.remainingBudget,
     transactions,
     setTransactions,
     weeklySpending,
@@ -1123,6 +1328,9 @@ export function useFinanceApp(repository = financeRepository) {
     handleSaveDateFormat,
     handleSaveNotifications,
     handleSaveDefaultCategory,
-    handleSaveDefaultPaymentMethod
+    handleSaveDefaultPaymentMethod,
+    handleReorderCategories,
+    handleReorderPaymentMethods,
+    handleReorderBudgetTypes
   };
 }

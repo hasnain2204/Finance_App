@@ -28,7 +28,9 @@ export function AboutScreen({ preferences, onBack }) {
           </div>
           <div className="more-row">
             <span>Appearance</span>
-            <span className="more-row-value">{preferences?.lightMode === false ? 'Dark' : 'Light'}</span>
+            <span className="more-row-value">
+              {preferences?.theme === 'system' ? 'System' : (preferences?.theme === 'dark' || preferences?.lightMode === false ? 'Dark' : 'Light')}
+            </span>
           </div>
         </section>
       </section>

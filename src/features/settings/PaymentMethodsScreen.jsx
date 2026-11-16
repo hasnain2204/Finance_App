@@ -17,7 +17,8 @@ export function PaymentMethodsScreen({
   onDelete,
   onBack,
   defaultPaymentMethodId,
-  onSelectDefault
+  onSelectDefault,
+  onReorder
 }) {
   return (
     <NamedEntityManager
@@ -41,10 +42,10 @@ export function PaymentMethodsScreen({
       onCancelDelete={() => setPaymentMethodToDelete(null)}
       onConfirmDelete={onDelete}
       deleteTitleId="delete-payment-method-title"
-      deleteTitle="Remove Payment Method?"
+      deleteTitle="Delete Payment Method?"
       deleteDescription={
         paymentMethodToDelete
-          ? `Remove “${paymentMethodToDelete.name}” from your payment methods? Methods used by existing transactions cannot be removed.`
+          ? `Delete “${paymentMethodToDelete.name}”? Any transactions using this payment method will be changed to General.`
           : ''
       }
       nameLabel="Payment Method Name"
@@ -62,6 +63,7 @@ export function PaymentMethodsScreen({
       defaultItemId={defaultPaymentMethodId}
       onSelectDefault={onSelectDefault}
       defaultLabel="Default Payment Method"
+      onReorder={onReorder}
     />
   );
 }

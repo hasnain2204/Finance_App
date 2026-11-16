@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Zap } from 'lucide-react';
 import {
-  calculateExpenseTotal,
+  calculateFinanceDashboard,
   calculateSpendingVelocity,
   formatCurrency,
-  fromPaisa,
-  getLocalDateString,
   getSmartGreeting
 } from '../../lib/finance';
 import { Panel, PanelHeader, EmptyState } from '../../components/ui';
@@ -15,6 +13,7 @@ import { WeeklyTrendChart } from './WeeklyTrendChart';
 export function HomeScreen({
   preferences,
   budgets,
+  budgetHistory = [],
   totalBudgetPaisa,
   transactions,
   weeklySpending,
@@ -52,25 +51,22 @@ export function HomeScreen({
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const hasBudget = budgets.some((budget) => budget.categoryId === 'overall');
-  const overallBudgetAmount = hasBudget ? fromPaisa(totalBudgetPaisa) : null;
-  const availableBalance = overallBudgetAmount === null
-    ? null
-    : overallBudgetAmount - calculateExpenseTotal(transactions);
-
-  const currentMonthStr = useMemo(() => getLocalDateString().slice(0, 7), []);
-  const monthlyExpense = useMemo(
-    () => calculateExpenseTotal(transactions, currentMonthStr),
-    [transactions, currentMonthStr]
-  );
+  const { displayedBudget, remainingBudget: availableBalance, monthlyExpense } = useMemo(() => {
+    return calculateFinanceDashboard({
+      budgetHistory,
+      budgets,
+      transactions,
+      currentDate: new Date()
+    });
+  }, [budgetHistory, budgets, transactions]);
 
   const velocity = useMemo(() => {
     return calculateSpendingVelocity({
       transactions,
       monthlyExpense,
-      overallBudget: overallBudgetAmount
+      overallBudget: displayedBudget
     });
-  }, [transactions, monthlyExpense, overallBudgetAmount]);
+  }, [transactions, monthlyExpense, displayedBudget]);
 
   return (
     <div className="home-dashboard">
@@ -100,14 +96,14 @@ export function HomeScreen({
           <div className="compact-stat-item">
             <span className="compact-stat-label">Budget</span>
             <strong className="compact-stat-value">
-              {overallBudgetAmount === null ? 'Not set' : formatCurrency(overallBudgetAmount)}
+              {displayedBudget === null ? 'Not set' : formatCurrency(displayedBudget)}
             </strong>
           </div>
           <div className="compact-stat-divider" aria-hidden="true" />
           <div className="compact-stat-item">
             <span className="compact-stat-label">Expenses</span>
             <strong className="compact-stat-value">
-              {formatCurrency(calculateExpenseTotal(transactions))}
+              {formatCurrency(monthlyExpense)}
             </strong>
           </div>
         </div>
@@ -129,11 +125,11 @@ export function HomeScreen({
           <div className="home-summary-metrics">
             <div className="home-summary-metric home-budget-metric">
               <span>Budget</span>
-              <strong>{overallBudgetAmount === null ? 'Not set' : formatCurrency(overallBudgetAmount)}</strong>
+              <strong>{displayedBudget === null ? 'Not set' : formatCurrency(displayedBudget)}</strong>
             </div>
             <div className="home-summary-metric home-expense-metric">
               <span>Total expenses</span>
-              <strong>{formatCurrency(calculateExpenseTotal(transactions))}</strong>
+              <strong>{formatCurrency(monthlyExpense)}</strong>
             </div>
           </div>
 

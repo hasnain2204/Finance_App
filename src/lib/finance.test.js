@@ -23,7 +23,9 @@ import {
   calculateWeekdayWeekendSplit,
   calculateCategorySurge,
   calculateFinancialHealthScore,
-  calculateAnalyticsOverview
+  calculateAnalyticsOverview,
+  calculateHomeDisplayBudget,
+  calculateFinanceDashboard
 } from './finance';
 
 const completeBackupData = () => ({
@@ -612,6 +614,189 @@ describe('finance utilities', () => {
       expect(overview.currentMonthExpense).toBe(3000);
       expect(overview.categoryTotals['cat-food']).toBe(1000);
       expect(overview.categoryTotals['cat-transport']).toBe(2000);
+    });
+
+    it('calculates home display budget using updated budget and fallback accumulation when remaining > latest', () => {
+      // Case 1: No budget at all
+      expect(calculateHomeDisplayBudget([], [], 0)).toBeNull();
+
+      // Case 2: Latest budget is 50,000; remaining is 40,000 (remaining <= latest) -> shows 50,000
+      const history1 = [
+        { id: 'b1', amount: 5000000, createdAt: '2026-11-10T10:00:00Z', entryType: 'addition' }
+      ];
+      expect(calculateHomeDisplayBudget(history1, [], 40000)).toBe(50000);
+
+      // Case 3: Updated budget is 20,000; remaining budget is 60,000 (remaining > latest).
+      // Adds 2nd last budget (50,000): 20,000 + 50,000 = 70,000 >= 60,000 -> shows 70,000.
+      const history2 = [
+        { id: 'b2', amount: 2000000, createdAt: '2026-11-15T10:00:00Z', entryType: 'addition' },
+        { id: 'b1', amount: 5000000, createdAt: '2026-11-10T10:00:00Z', entryType: 'addition' }
+      ];
+      expect(calculateHomeDisplayBudget(history2, [], 60000)).toBe(70000);
+
+      // Case 4: Updated budget is 15,000; 2nd last is 20,000; 3rd last is 40,000; remaining budget is 50,000.
+      // 15,000 < 50,000 -> add 2nd last (20,000) = 35,000 < 50,000 -> add 3rd last (40,000) = 75,000 >= 50,000 -> shows 75,000.
+      const history3 = [
+        { id: 'b3', amount: 1500000, createdAt: '2026-11-16T10:00:00Z', entryType: 'addition' },
+        { id: 'b2', amount: 2000000, createdAt: '2026-11-15T10:00:00Z', entryType: 'addition' },
+        { id: 'b1', amount: 4000000, createdAt: '2026-11-10T10:00:00Z', entryType: 'addition' }
+      ];
+      expect(calculateHomeDisplayBudget(history3, [], 50000)).toBe(75000);
+
+      // Case 5: When remaining budget <= latest updated budget, it shows ONLY the updated budget (not sum)
+      expect(calculateHomeDisplayBudget(history3, [], 10000)).toBe(15000);
+    });
+
+    describe('calculateFinanceDashboard', () => {
+      it('returns null budgets when no budget exists and calculates monthly expenses', () => {
+        const transactions = [
+          { type: 'expense', amount: 500, date: '2026-11-05' },
+          { type: 'expense', amount: 1200, date: '2026-11-10' },
+          { type: 'expense', amount: 3000, date: '2026-10-20' } // Different month
+        ];
+        const res = calculateFinanceDashboard({
+          budgetHistory: [],
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-11-16')
+        });
+
+        expect(res.displayedBudget).toBeNull();
+        expect(res.remainingBudget).toBeNull();
+        expect(res.monthlyExpense).toBe(1700);
+      });
+
+      it('displays the single budget and calculates remaining balance correctly', () => {
+        const history = [
+          { id: 'b1', amount: 5000000, date: '2026-11-01', createdAt: '2026-11-01T10:00:00Z' }
+        ];
+        const transactions = [
+          { type: 'expense', amount: 10000, date: '2026-11-05' }
+        ];
+        const res = calculateFinanceDashboard({
+          budgetHistory: history,
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-11-16')
+        });
+
+        expect(res.displayedBudget).toBe(50000);
+        expect(res.remainingBudget).toBe(40000);
+        expect(res.monthlyExpense).toBe(10000);
+      });
+
+      it('shows updated budget and keeps remaining budget same when remaining <= latest budget', () => {
+        // Initial baseline was 50,000. Spent 10,000 -> remaining budget = 40,000.
+        // User updates budget to 50,000 (or 60,000).
+        // It must show the updated budget 50,000 (NOT cumulative 100,000!).
+        // And remaining budget must stay 40,000.
+        const history = [
+          { id: 'b2', amount: 5000000, date: '2026-11-16', createdAt: '2026-11-16T10:00:00Z' },
+          { id: 'b1', amount: 5000000, date: '2026-11-01', createdAt: '2026-11-01T10:00:00Z' }
+        ];
+        const transactions = [
+          { type: 'expense', amount: 10000, date: '2026-11-05' }
+        ];
+        const res = calculateFinanceDashboard({
+          budgetHistory: history,
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-11-16')
+        });
+
+        expect(res.displayedBudget).toBe(50000);
+        expect(res.remainingBudget).toBe(40000);
+        expect(res.monthlyExpense).toBe(10000);
+      });
+
+      it('adds 2nd last budget when remaining budget is more than latest budget', () => {
+        // Initial baseline was 50,000. Spent 10,000 -> remaining budget = 40,000.
+        // User updates budget to 30,000.
+        // Since remaining (40,000) > latest budget (30,000):
+        // Adds 2nd last budget (50,000): 30,000 + 50,000 = 80,000 >= 40,000!
+        // Displayed budget becomes 80,000. Remaining budget is 40,000.
+        const history = [
+          { id: 'b2', amount: 3000000, date: '2026-11-16', createdAt: '2026-11-16T10:00:00Z' },
+          { id: 'b1', amount: 5000000, date: '2026-11-01', createdAt: '2026-11-01T10:00:00Z' }
+        ];
+        const transactions = [
+          { type: 'expense', amount: 10000, date: '2026-11-05' }
+        ];
+        const res = calculateFinanceDashboard({
+          budgetHistory: history,
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-11-16')
+        });
+
+        expect(res.displayedBudget).toBe(80000);
+        expect(res.remainingBudget).toBe(40000);
+        expect(res.monthlyExpense).toBe(10000);
+        expect(res.displayedBudget).toBeGreaterThanOrEqual(res.remainingBudget);
+      });
+
+      it('adds 2nd and 3rd last budgets if still less than remaining budget', () => {
+        // History: b1 (50,000 oldest), b2 (15,000), b3 (10,000 latest)
+        // Expenses = 10,000.
+        // Baseline = 50,000 -> remaining budget = 40,000.
+        // Latest budget = 10,000.
+        // 40,000 > 10,000 -> add 2nd last (15,000) = 25,000.
+        // Still 40,000 > 25,000 -> add 3rd last (50,000) = 75,000 >= 40,000.
+        const history = [
+          { id: 'b3', amount: 1000000, date: '2026-11-16', createdAt: '2026-11-16T12:00:00Z' },
+          { id: 'b2', amount: 1500000, date: '2026-11-16', createdAt: '2026-11-16T11:00:00Z' },
+          { id: 'b1', amount: 5000000, date: '2026-11-01', createdAt: '2026-11-01T10:00:00Z' }
+        ];
+        const transactions = [
+          { type: 'expense', amount: 10000, date: '2026-11-05' }
+        ];
+        const res = calculateFinanceDashboard({
+          budgetHistory: history,
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-11-16')
+        });
+
+        expect(res.displayedBudget).toBe(75000);
+        expect(res.remainingBudget).toBe(40000);
+        expect(res.monthlyExpense).toBe(10000);
+      });
+
+      it('resets expenses at the 1st of a new month and isolates expenses to the month', () => {
+        const transactions = [
+          { type: 'expense', amount: 25000, date: '2026-10-31' },
+          { type: 'expense', amount: 5000, date: '2026-11-01' },
+          { type: 'expense', amount: 3000, date: '2026-11-05' }
+        ];
+        const history = [
+          { id: 'b1', amount: 6000000, date: '2026-11-01', createdAt: '2026-11-01T10:00:00Z' }
+        ];
+
+        // On 2026-11-01 (or mid November), October's 25,000 is reset and excluded
+        const res = calculateFinanceDashboard({
+          budgetHistory: history,
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-11-10')
+        });
+
+        expect(res.monthlyExpense).toBe(8000); // 5,000 + 3,000 (not 33,000!)
+        expect(res.displayedBudget).toBe(60000);
+        expect(res.remainingBudget).toBe(52000); // 60,000 - 8,000
+
+        // In the next month (2026-12-01), November's expenses also reset to 0
+        const nextMonthRes = calculateFinanceDashboard({
+          budgetHistory: [
+            { id: 'b2', amount: 7000000, date: '2026-12-01', createdAt: '2026-12-01T10:00:00Z' }
+          ],
+          budgets: [],
+          transactions,
+          currentDate: new Date('2026-12-01')
+        });
+        expect(nextMonthRes.monthlyExpense).toBe(0);
+        expect(nextMonthRes.displayedBudget).toBe(70000);
+        expect(nextMonthRes.remainingBudget).toBe(70000);
+      });
     });
   });
 });

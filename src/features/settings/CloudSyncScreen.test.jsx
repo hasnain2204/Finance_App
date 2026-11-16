@@ -34,4 +34,16 @@ describe('Cloud Sync settings screen', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Cloud Sync' }));
     expect(props.onToggleSync).toHaveBeenCalledWith(true);
   });
+
+  it('renders the round arrow sync button when connected and enabled', () => {
+    const props = makeProps({ id: 'account-1', email: 'user@gmail.com' });
+    props.sync.syncEnabled = true;
+    props.sync.syncNow = vi.fn();
+    render(<CloudSyncScreen {...props} />);
+
+    const syncBtn = screen.getByRole('button', { name: 'Sync now' });
+    expect(syncBtn).toBeDefined();
+    fireEvent.click(syncBtn);
+    expect(props.sync.syncNow).toHaveBeenCalledOnce();
+  });
 });

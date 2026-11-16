@@ -65,6 +65,15 @@ export async function enqueueLocalMutation(database, { collection, operation, re
     status: 'pending',
     lastError: null
   });
+  if (typeof globalThis !== 'undefined' && typeof globalThis.dispatchEvent === 'function') {
+    try {
+      globalThis.dispatchEvent(new CustomEvent('finance:mutation', {
+        detail: { collection, operation, syncId: record.syncId }
+      }));
+    } catch (_) {
+      // Ignored in non-DOM test runners
+    }
+  }
   return operationId;
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { WalletCards } from 'lucide-react';
-import { Panel, PanelHeader, EmptyState } from '../../components/ui';
+import { EmptyState } from '../../components/ui';
 import { HistoryItem } from '../transactions/HistoryItem';
 import { groupTransactionsByDateBuckets } from '../transactions/TransactionsScreen';
 
@@ -38,44 +38,40 @@ export function BudgetScreen({
 
   return (
     <div className="stacked-blocks budget-view-shell">
-      <Panel>
-        <PanelHeader>
-          <div>
-            <h2>Budget history</h2>
-          </div>
-        </PanelHeader>
+      <div className="screen-page-header">
+        <h2 className="screen-page-title">Budget history</h2>
+      </div>
 
-        {dateGroups.length === 0 ? (
-          <div className="transaction-list">
-            <EmptyState>No budget history yet.</EmptyState>
-          </div>
-        ) : (
-          <div className="transaction-groups">
-            {dateGroups.map((group) => (
-              <section key={group.id} className="transaction-date-group" aria-label={group.title}>
-                <div className="transaction-date-group-header">
-                  <h3 className="transaction-date-group-title">{group.title}</h3>
-                  <span className="transaction-date-group-badge">
-                    {group.items.length}
-                  </span>
-                </div>
-                <div className="transaction-list">
-                  {group.items.map((entry) => (
-                    <HistoryItem
-                      key={`budget-${entry.id}`}
-                      entry={{ ...entry, historyType: 'budget', returnTab: 'budget' }}
-                      categoryMap={categoryMap}
-                      paymentMap={paymentMap}
-                      dateFormat={dateFormat}
-                      onOpen={onOpenTransaction}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-      </Panel>
+      {dateGroups.length === 0 ? (
+        <div className="transaction-empty-card">
+          <EmptyState>No budget history yet.</EmptyState>
+        </div>
+      ) : (
+        <div className="transaction-groups">
+          {dateGroups.map((group) => (
+            <section key={group.id} className="transaction-date-group" aria-label={group.title}>
+              <div className="transaction-date-group-header">
+                <h3 className="transaction-date-group-title">{group.title}</h3>
+                <span className="transaction-date-group-badge">
+                  {group.items.length}
+                </span>
+              </div>
+              <div className="transaction-group-card">
+                {group.items.map((entry) => (
+                  <HistoryItem
+                    key={`budget-${entry.id}`}
+                    entry={{ ...entry, historyType: 'budget', returnTab: 'budget' }}
+                    categoryMap={categoryMap}
+                    paymentMap={paymentMap}
+                    dateFormat={dateFormat}
+                    onOpen={onOpenTransaction}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
 
       <div className="floating-action-group" aria-label="Quick actions">
         <button

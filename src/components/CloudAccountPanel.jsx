@@ -92,16 +92,11 @@ export default function CloudAccountPanel({ onBack, onDataChanged, auth, sync, o
                   </button>
                 </div>
               ) : null}
-              {sync.syncEnabled && sync.status.ownerUserId === auth.user.id && sync.status.status !== 'offline' ? (
+              {sync.syncEnabled && sync.status.ownerUserId === auth.user.id && sync.status.status !== 'offline' && sync.status.errors ? (
                 <div className="sync-actions">
-                  <button type="button" className="primary-action full cloud-auth-submit" onClick={() => runAndRefresh(sync.syncNow)} disabled={sync.busy}>
-                    {sync.busy ? 'Syncing…' : 'Sync now'}
+                  <button type="button" className="link-button" onClick={() => runAndRefresh(sync.retryFailed)} disabled={sync.busy}>
+                    Retry failed operations
                   </button>
-                  {sync.status.errors ? (
-                    <button type="button" className="link-button" onClick={() => runAndRefresh(sync.retryFailed)} disabled={sync.busy}>
-                      Retry failed operations
-                    </button>
-                  ) : null}
                 </div>
               ) : null}
               {sync.syncEnabled && (!sync.status.ownerUserId || sync.status.ownerUserId === auth.user.id) ? (
@@ -113,11 +108,11 @@ export default function CloudAccountPanel({ onBack, onDataChanged, auth, sync, o
               {sync.message ? <p className="cloud-auth-message" role="status">{sync.message}</p> : null}
               <button
                 type="button"
-                className="primary-action full cloud-auth-submit"
+                className="devalued-signout-btn"
                 onClick={auth.signOut}
                 disabled={auth.actionLoading || sync.busy}
               >
-                <LogOut size={17} aria-hidden="true" />
+                <LogOut size={15} aria-hidden="true" />
                 {auth.actionLoading ? 'Signing out…' : 'Sign out'}
               </button>
             </section>
