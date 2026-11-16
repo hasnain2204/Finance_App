@@ -313,31 +313,49 @@ export function calculateFinanceDashboard({
     };
   }
 
-  // Chronological order (oldest to newest) to trace baseline and remaining budget
-  const chronological = [...activeEntries].reverse();
-  const baselineBudget = fromPaisa(Number(chronological[0].amount || 0));
-  const remainingBudget = baselineBudget - monthlyExpense;
-
+  // Multiple entries case:
   // Latest budget is activeEntries[0]
   const latestBudget = fromPaisa(Number(activeEntries[0].amount || 0));
   let displayedBudget = latestBudget;
 
-  // Mathematical and logical rule:
-  // If remaining budget is more than latest budget, add 2nd last budget in latest budget.
-  // If still greater than budget, add 3rd last budget in 2nd last and latest budget, etc.
-  // Budget should always be >= remaining budget.
-  if (remainingBudget > latestBudget) {
+  // Calculate prior remaining budget from previous entries if available
+  let priorRemaining = 0;
+  if (activeEntries.length > 1) {
+    const priorDashboard = calculateFinanceDashboard({
+      budgetHistory: activeEntries.slice(1),
+      budgets,
+      transactions,
+      currentDate
+    });
+    priorRemaining = priorDashboard.remainingBudget ?? 0;
+  }
+
+  // Target threshold:
+  // - If monthlyExpense > displayedBudget, latest budget alone is overspent:
+  //   add previous budgets so displayedBudget covers monthlyExpense if possible
+  //   (so available section shows the positive amount left behind, not negative if something is still left).
+  // - If priorRemaining > latestBudget, previous remaining balance was higher than latest budget:
+  //   add previous budgets so displayedBudget >= priorRemaining.
+  const targetThreshold = Math.max(
+    monthlyExpense,
+    priorRemaining > 0 ? priorRemaining : 0
+  );
+
+  if (targetThreshold > displayedBudget) {
     for (let i = 1; i < activeEntries.length; i++) {
       const prevAmount = fromPaisa(Number(activeEntries[i].amount || 0));
       displayedBudget += prevAmount;
-      if (displayedBudget >= remainingBudget) {
+      if (displayedBudget >= targetThreshold) {
         break;
       }
     }
-    if (displayedBudget < remainingBudget) {
-      displayedBudget = remainingBudget;
+    if (priorRemaining > 0 && displayedBudget < priorRemaining) {
+      displayedBudget = priorRemaining;
     }
   }
+
+  // Available balance is the amount left behind of the latest budget/s
+  const remainingBudget = displayedBudget - monthlyExpense;
 
   return {
     displayedBudget,

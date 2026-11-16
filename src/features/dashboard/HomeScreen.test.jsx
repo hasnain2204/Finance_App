@@ -50,13 +50,13 @@ describe('HomeScreen', () => {
     const expensePills = getAllByText(/PKR 5,000/);
     expect(expensePills.length).toBeGreaterThan(0);
 
-    // Remaining available balance = 50,000 - 5,000 = 45,000
-    const availablePills = getAllByText(/PKR 45,000/);
-    expect(availablePills.length).toBeGreaterThan(0);
-
-    // Budget displayed = 80,000 (because 45,000 > 30,000 so 2nd last 50,000 was added)
+    // Budget displayed = 80,000 (because prior remaining 45,000 > latest 30,000 so 2nd last 50,000 was added)
     const budgetPills = getAllByText(/PKR 80,000/);
     expect(budgetPills.length).toBeGreaterThan(0);
+
+    // Remaining available balance is the amount left behind of the displayed budgets (80,000 - 5,000 = 75,000)
+    const availablePills = getAllByText(/PKR 75,000/);
+    expect(availablePills.length).toBeGreaterThan(0);
   });
 
   it('shows exactly the updated budget and preserves remaining budget when remaining budget <= latest budget', () => {
