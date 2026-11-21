@@ -6,23 +6,21 @@ import { getLocalDateString, toPaisa } from '../../lib/finance';
 describe('HomeScreen', () => {
   const dummyPreferences = { name: 'Alex', currency: 'PKR' };
 
-  it('displays the updated budget and current month expenses when remaining > latest budget', () => {
+  it('displays the current month cumulative budget and banking available balance', () => {
     // Current month transactions vs previous month
     const currentMonth = getLocalDateString().slice(0, 7);
     const transactions = [
       { id: 1, type: 'expense', amount: 2000, date: `${currentMonth}-05`, categoryId: 'food' },
       { id: 2, type: 'expense', amount: 3000, date: `${currentMonth}-10`, categoryId: 'bills' },
-      // Previous month transaction: should NOT be included in current month expenses
+      // Previous month transaction: deducted from bank available balance, excluded from monthly expense
       { id: 3, type: 'expense', amount: 10000, date: '2026-10-15', categoryId: 'rent' }
     ];
 
     // Budget history:
-    // older: 50,000; latest: 30,000.
-    // Current month expenses = 2,000 + 3,000 = 5,000 (October 10,000 ignored).
-    // Baseline budget = 50,000.
-    // Remaining budget = 50,000 - 5,000 = 45,000.
-    // Since remaining (45,000) > latest budget (30,000):
-    // Adds 2nd last budget (50,000) -> 30,000 + 50,000 = 80,000 >= 45,000!
+    // b1: 50,000 in current month; b2: 30,000 in current month.
+    // If more than one budget added in current month, they are added up: 50,000 + 30,000 = 80,000.
+    // Current month expenses = 2,000 + 3,000 = 5,000.
+    // Available balance = total deposits (80,000) - total all-time expenses (15,000) = 65,000.
     const budgetHistory = [
       { id: 'b2', amount: toPaisa(30000), date: `${currentMonth}-16`, createdAt: `${currentMonth}-16T10:00:00Z` },
       { id: 'b1', amount: toPaisa(50000), date: `${currentMonth}-01`, createdAt: `${currentMonth}-01T10:00:00Z` }
@@ -50,29 +48,29 @@ describe('HomeScreen', () => {
     const expensePills = getAllByText(/PKR 5,000/);
     expect(expensePills.length).toBeGreaterThan(0);
 
-    // Budget displayed = 80,000 (because prior remaining 45,000 > latest 30,000 so 2nd last 50,000 was added)
+    // Budget displayed = 80,000 (50,000 + 30,000 added up in current month)
     const budgetPills = getAllByText(/PKR 80,000/);
     expect(budgetPills.length).toBeGreaterThan(0);
 
-    // Remaining available balance is the amount left behind of the displayed budgets (80,000 - 5,000 = 75,000)
-    const availablePills = getAllByText(/PKR 75,000/);
+    // Available balance = 80,000 - 15,000 = 65,000
+    const availablePills = getAllByText(/PKR 65,000/);
     expect(availablePills.length).toBeGreaterThan(0);
   });
 
-  it('shows exactly the updated budget and preserves remaining budget when remaining budget <= latest budget', () => {
+  it('isolates budget to current month while available balance preserves all-time account funds', () => {
     const currentMonth = getLocalDateString().slice(0, 7);
     // Expenses = 10,000
     const transactions = [
       { id: 1, type: 'expense', amount: 10000, date: `${currentMonth}-05`, categoryId: 'food' }
     ];
 
-    // Initial baseline: 50,000. Expenses = 10,000. Remaining = 40,000.
-    // Latest updated budget = 50,000.
-    // Since remaining (40,000) <= latest budget (50,000), displayed budget is 50,000 (NOT 100,000!)
-    // Remaining budget stays 40,000.
+    // b1 was added in October (previous month): 50,000
+    // b2 was added in November (current month): 50,000
+    // Current month budget = 50,000 (only November budgets count toward November budget)
+    // Available balance = 50,000 + 50,000 - 10,000 = 90,000
     const budgetHistory = [
       { id: 'b2', amount: toPaisa(50000), date: `${currentMonth}-16`, createdAt: `${currentMonth}-16T10:00:00Z` },
-      { id: 'b1', amount: toPaisa(50000), date: `${currentMonth}-01`, createdAt: `${currentMonth}-01T10:00:00Z` }
+      { id: 'b1', amount: toPaisa(50000), date: '2026-10-01', createdAt: '2026-10-01T10:00:00Z' }
     ];
 
     const { getAllByText } = render(
@@ -93,12 +91,12 @@ describe('HomeScreen', () => {
       />
     );
 
-    // Budget shows updated 50,000 (not cumulative 100,000)
+    // Budget shows current month's budget 50,000 (not October's 50,000)
     const budgetPills = getAllByText(/PKR 50,000/);
     expect(budgetPills.length).toBeGreaterThan(0);
 
-    // Available balance shows 40,000
-    const availablePills = getAllByText(/PKR 40,000/);
+    // Available balance shows 90,000 (100,000 total deposited - 10,000 total expenses)
+    const availablePills = getAllByText(/PKR 90,000/);
     expect(availablePills.length).toBeGreaterThan(0);
 
     // Expenses show 10,000
