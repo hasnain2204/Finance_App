@@ -16,7 +16,8 @@ export function MoreScreen({
   onOpenDateFormat,
   onOpenNotifications,
   onOpenHelp,
-  onOpenAbout
+  onOpenAbout,
+  onOpenPrivacySecurity
 }) {
   return (
     <div className="more-page">
@@ -47,6 +48,10 @@ export function MoreScreen({
         </button>
         <button type="button" className="more-row" onClick={onOpenCloudSync}>
           <span>Cloud Sync</span>
+          <ChevronRight className="more-chevron" size={20} />
+        </button>
+        <button type="button" className="more-row" onClick={onOpenPrivacySecurity}>
+          <span>Privacy &amp; Security</span>
           <ChevronRight className="more-chevron" size={20} />
         </button>
         <button type="button" className="more-row" onClick={onOpenCurrency}>

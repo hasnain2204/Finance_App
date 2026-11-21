@@ -32,7 +32,9 @@ import { PaymentMethodsScreen } from './features/settings/PaymentMethodsScreen';
 import { BudgetTypesScreen } from './features/settings/BudgetTypesScreen';
 import { OnboardingScreen } from './features/settings/OnboardingScreen';
 import { NotesScreen } from './features/notes/NotesScreen';
+import { PinUnlockScreen, PrivacySecurityScreen } from './features/settings/PrivacySecurityScreen';
 import { useCloudSync } from './services/CloudSyncContext';
+import { securityRepository } from './services/securityRepository';
 import { supabaseConfiguration } from './services/supabaseClient';
 
 const CloudAccountPanel = lazy(() => import('./components/CloudAccountPanel'));
@@ -64,6 +66,9 @@ function App() {
 
 function AppContent({ app, activateCloudRuntime }) {
   const { auth, sync } = useCloudSync();
+  const [securitySettings, setSecuritySettings] = useState(() => securityRepository.read());
+  const [appUnlocked, setAppUnlocked] = useState(() => !securityRepository.read().appLockEnabled);
+  const [notesUnlocked, setNotesUnlocked] = useState(false);
   const {
     tab,
     setTab,
@@ -76,6 +81,38 @@ function AppContent({ app, activateCloudRuntime }) {
   } = app;
 
   const lastNavClickRef = useRef({ tab: null, time: 0 });
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && securitySettings.appLockEnabled) {
+        setAppUnlocked(false);
+      }
+      if (document.visibilityState === 'hidden' && securitySettings.notesLockEnabled) {
+        setNotesUnlocked(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [securitySettings.appLockEnabled, securitySettings.notesLockEnabled]);
+
+  const handleSecuritySettingsSave = (changes) => {
+    const next = securityRepository.saveSettings(changes);
+    setSecuritySettings(next);
+  };
+
+  const unlockWithPin = async (pin) => {
+    if (!await securityRepository.verifyPin(pin)) throw new Error('That PIN is incorrect.');
+    if (securitySettings.appLockEnabled) setAppUnlocked(true);
+    if (tab === 'notes' && securitySettings.notesLockEnabled) setNotesUnlocked(true);
+  };
+
+  const unlockWithBiometric = async () => {
+    if (!await securityRepository.authenticateBiometric()) {
+      throw new Error('Biometric unlock is unavailable. Use your PIN instead.');
+    }
+    if (securitySettings.appLockEnabled) setAppUnlocked(true);
+    if (tab === 'notes' && securitySettings.notesLockEnabled) setNotesUnlocked(true);
+  };
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -211,6 +248,18 @@ function AppContent({ app, activateCloudRuntime }) {
     );
   }
 
+  if (securitySettings.appLockEnabled && !appUnlocked) {
+    return (
+      <PinUnlockScreen
+        title="App locked"
+        description="Unlock PWS with your PIN or device biometrics."
+        biometricEnabled={securitySettings.biometricEnabled}
+        onUnlock={unlockWithPin}
+        onBiometric={unlockWithBiometric}
+      />
+    );
+  }
+
   if (preferences && !preferences.onboardingCompleted) {
     return (
       <OnboardingScreen
@@ -224,7 +273,28 @@ function AppContent({ app, activateCloudRuntime }) {
   }
 
   if (tab === 'notes') {
-    return <NotesScreen onBack={() => setTab('analytics')} />;
+    if (securitySettings.notesLockEnabled && !notesUnlocked) {
+      return (
+        <PinUnlockScreen
+          title="Notes locked"
+          description="Unlock your personal notes with your PIN or device biometrics."
+          biometricEnabled={securitySettings.biometricEnabled}
+          onUnlock={unlockWithPin}
+          onBiometric={unlockWithBiometric}
+        />
+      );
+    }
+    return <NotesScreen onBack={() => { setNotesUnlocked(false); setTab('analytics'); }} />;
+  }
+
+  if (tab === 'privacy-security') {
+    return (
+      <PrivacySecurityScreen
+        settings={securitySettings}
+        onSaveSettings={handleSecuritySettingsSave}
+        onBack={() => setTab('more')}
+      />
+    );
   }
 
   if (tab === 'add-transaction') {
@@ -502,7 +572,7 @@ function AppContent({ app, activateCloudRuntime }) {
             <button
               type="button"
               className="more-button notes-topbar-button"
-              onClick={() => setTab('notes')}
+              onClick={() => { setNotesUnlocked(false); setTab('notes'); }}
               aria-label="Open notes"
               title="Notes"
             >
@@ -595,6 +665,7 @@ function AppContent({ app, activateCloudRuntime }) {
             onOpenAppearance={() => setTab('appearance')}
             onOpenDateFormat={() => setTab('date-format')}
             onOpenNotifications={() => setTab('notifications')}
+            onOpenPrivacySecurity={() => setTab('privacy-security')}
             onOpenPreferences={() => setTab('date-format')}
             onOpenHelp={() => setTab('help')}
             onOpenAbout={() => {
