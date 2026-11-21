@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Archive, ArchiveRestore, ArrowLeft, AudioLines, Clipboard, Download, FileText, History, ImagePlus,
-  LayoutGrid, List as ListIcon, Palette, Paperclip, Pin, Plus, Search, Sparkles, Tag, Trash2, Undo2
+  Archive, ArchiveRestore, ArrowLeft, AudioLines, Download, FileText, History, ImagePlus,
+  LayoutGrid, List as ListIcon, Palette, Paperclip, Pin, Plus, Search, Sparkles, Tag, Trash2, Undo2, X
 } from 'lucide-react';
 import { ConfirmDialog, EmptyState } from '../../components/ui';
 import { notesRepository } from '../../services/notesRepository';
@@ -12,38 +12,18 @@ function createNoteId() {
   return globalThis.crypto?.randomUUID?.() || `note-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function notePreview(body) {
-  return body.trim().replace(/\s+/g, ' ');
+function notePreview(body, maxWords = 60) {
+  const words = body.trim().split(/\s+/).filter(Boolean);
+  return words.length > maxWords ? `${words.slice(0, maxWords).join(' ')}…` : words.join(' ');
 }
+
+const noteColors = ['default', 'green', 'blue', 'yellow', 'pink', 'purple'];
+const labelColors = ['green', 'blue', 'yellow', 'pink', 'purple'];
 
 function formatUpdatedAt(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function markdownForNode(node) {
-  if (!node) return '';
-  if (node.type === 'text') {
-    return (node.marks || []).reduce((text, mark) => {
-      if (mark.type === 'bold') return `**${text}**`;
-      if (mark.type === 'italic') return `*${text}*`;
-      if (mark.type === 'strike') return `~~${text}~~`;
-      if (mark.type === 'code') return `\`${text}\``;
-      if (mark.type === 'link') return `[${text}](${mark.attrs?.href || ''})`;
-      return text;
-    }, node.text || '');
-  }
-  const children = (node.content || []).map(markdownForNode);
-  if (node.type === 'heading') return `${'#'.repeat(node.attrs?.level || 1)} ${children.join('')}`;
-  if (node.type === 'paragraph') return children.join('');
-  if (node.type === 'bulletList') return children.map((item) => `- ${item}`).join('\n');
-  if (node.type === 'orderedList') return children.map((item, index) => `${index + 1}. ${item}`).join('\n');
-  if (node.type === 'taskList') return (node.content || []).map((item) => `- [${item.attrs?.checked ? 'x' : ' '}] ${markdownForNode(item)}`).join('\n');
-  if (node.type === 'taskItem' || node.type === 'listItem') return children.join('\n');
-  if (node.type === 'blockquote') return children.map((line) => `> ${line}`).join('\n');
-  if (node.type === 'codeBlock') return `\`\`\`\n${children.join('')}\n\`\`\``;
-  return children.join('\n\n');
 }
 
 const builtInTemplates = [
@@ -95,6 +75,10 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showSketch, setShowSketch] = useState(false);
+  const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+  const [colorNoteId, setColorNoteId] = useState(null);
+  const [newLabel, setNewLabel] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState('green');
   const attachmentInputRef = useRef(null);
   const recorderRef = useRef(null);
   const recordingTimeoutRef = useRef(null);
@@ -295,7 +279,23 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
       data,
       createdAt: new Date().toISOString()
     });
-    if (saved) setShowSketch(false);
+    setShowSketch(false);
+    return saved;
+  };
+
+  const addLabel = () => {
+    const label = newLabel.trim().replace(/^#/, '');
+    if (!label || !selectedNote) return;
+    updateNote({
+      tags: [...new Set([...(selectedNote.tags || []), label])],
+      tagColors: { ...(selectedNote.tagColors || {}), [label]: newLabelColor }
+    });
+    setNewLabel('');
+  };
+
+  const changeNoteColor = (note, color) => {
+    const updatedNote = { ...note, color, updatedAt: new Date().toISOString() };
+    if (persistNote(updatedNote)) setColorNoteId(null);
   };
 
   const removeAttachment = (id) => {
@@ -334,18 +334,7 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
 
   const handleExport = async (format) => {
     if (!selectedNote) return;
-    const text = format === 'markdown' && selectedNote.content
-      ? markdownForNode(selectedNote.content)
-      : selectedNote.body;
-    if (format === 'clipboard') {
-      try {
-        await navigator.clipboard.writeText(text);
-        setError('');
-      } catch {
-        setError('Clipboard access is unavailable in this browser.');
-      }
-      return;
-    }
+    const text = selectedNote.body || '';
     if (format === 'pdf') {
       try {
         const { jsPDF } = await import('jspdf');
@@ -363,19 +352,21 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
           pdf.text(line, 18, y);
         }
         pdf.save(`${selectedNote.title.trim() || 'note'}.pdf`);
+        setShowDownloadOptions(false);
         return;
       } catch (exportError) {
         setError(exportError?.message || 'The PDF could not be created.');
         return;
       }
     }
-    const blob = new Blob([text], { type: format === 'markdown' ? 'text/markdown' : 'text/plain' });
+    const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${selectedNote.title.trim() || 'note'}.${format === 'markdown' ? 'md' : 'txt'}`;
+    link.download = `${selectedNote.title.trim() || 'note'}.txt`;
     link.click();
     URL.revokeObjectURL(url);
+    setShowDownloadOptions(false);
   };
 
   const loadHistory = () => {
@@ -420,6 +411,14 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
   const allTags = useMemo(() => [...new Set(notes.flatMap((note) => note.tags || []))].sort(), [notes]);
   const allFolders = useMemo(() => [...new Set(notes.map((note) => note.folder).filter(Boolean))].sort(), [notes]);
 
+  if (selectedNote && showSketch) {
+    return (
+      <Suspense fallback={<main className="notes-sketch-page"><p role="status">Opening sketch pad…</p></main>}>
+        <SketchPad onSave={saveSketch} />
+      </Suspense>
+    );
+  }
+
   if (selectedNote) {
     return (
       <main className="notes-shell">
@@ -427,7 +426,6 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
           <button type="button" className="back-button" onClick={() => setSelectedNoteId(null)} aria-label="Back to notes">
             <ArrowLeft size={22} />
           </button>
-          <span className="notes-save-status" role="status">{error ? 'Changes not saved' : 'Saved on this device'}</span>
           <div className="topbar-actions">
             <button
               type="button"
@@ -464,61 +462,45 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
 
         <section className="notes-editor">
           {error ? <p className="notes-error" role="alert">{error}</p> : null}
-          <div className="notes-editor-tools">
-            <input
-              ref={attachmentInputRef}
-              className="visually-hidden"
-              type="file"
-              accept="image/*,application/pdf,audio/*"
-              multiple
-              onChange={handleAttachmentSelect}
-              aria-label="Choose note attachments"
-            />
-            <button type="button" className="notes-export-button" onClick={() => attachmentInputRef.current?.click()}>
-              <Paperclip size={15} /> Attach
-            </button>
-            <button type="button" className="notes-export-button" onClick={() => setShowSketch((current) => !current)}>
-              <ImagePlus size={15} /> Sketch
-            </button>
-            <button type="button" className="notes-export-button" onClick={toggleRecording}>
-              <AudioLines size={15} /> {isRecording ? 'Stop recording' : 'Record audio'}
-            </button>
-            <button type="button" className="notes-export-button" onClick={transcribeVoice}>
-              <Sparkles size={15} /> Dictate
-            </button>
-            <label className="notes-color-picker" title="Card color">
-              <Palette size={17} aria-hidden="true" />
-              <select
-                aria-label="Note color"
-                value={selectedNote.color || 'default'}
-                onChange={(event) => updateNote({ color: event.target.value })}
-              >
-                <option value="default">Default color</option>
-                <option value="green">Green</option>
-                <option value="blue">Blue</option>
-                <option value="yellow">Yellow</option>
-                <option value="pink">Pink</option>
-                <option value="purple">Purple</option>
-              </select>
-            </label>
-            <label className="notes-emoji-picker">
-              <span aria-hidden="true">{selectedNote.emoji || '📝'}</span>
-              <input
-                value={selectedNote.emoji || ''}
-                onChange={(event) => updateNote({ emoji: event.target.value.slice(0, 4) })}
-                aria-label="Note cover emoji"
-                placeholder="Emoji"
-              />
-            </label>
-            <label className="notes-metadata-input">
-              <Tag size={16} aria-hidden="true" />
-              <input
-                value={(selectedNote.tags || []).join(', ')}
-                onChange={(event) => updateNote({ tags: [...new Set(event.target.value.split(',').map((tag) => tag.trim().replace(/^#/, '')).filter(Boolean))] })}
-                aria-label="Note tags"
-                placeholder="Tags, separated by commas"
-              />
-            </label>
+          <div className="notes-metadata-row">
+            <details className="notes-label-menu">
+              <summary role="button" aria-label="Manage note labels">
+                <Tag size={16} aria-hidden="true" />
+                <span>{selectedNote.tags?.length ? selectedNote.tags.map((tag) => `#${tag}`).join(' ') : 'Labels'}</span>
+              </summary>
+              <div className="notes-label-popover">
+                {(selectedNote.tags || []).length ? (
+                  <div className="notes-label-list">
+                    {selectedNote.tags.map((label) => (
+                      <span className={`notes-label-chip note-label-${selectedNote.tagColors?.[label] || 'green'}`} key={label}>
+                        #{label}
+                        <button
+                          type="button"
+                          aria-label={`Remove label ${label}`}
+                          onClick={() => updateNote({ tags: selectedNote.tags.filter((item) => item !== label) })}
+                        ><X size={13} /></button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="notes-label-color-options" role="group" aria-label="Label color">
+                  {labelColors.map((color) => (
+                    <button
+                      type="button"
+                      key={color}
+                      className={`notes-color-dot note-color-dot-${color} ${newLabelColor === color ? 'selected' : ''}`}
+                      onClick={() => setNewLabelColor(color)}
+                      aria-label={`${color} label color`}
+                      aria-pressed={newLabelColor === color}
+                    />
+                  ))}
+                </div>
+                <div className="notes-add-label">
+                  <input value={newLabel} onChange={(event) => setNewLabel(event.target.value)} aria-label="New label name" placeholder="Label name" />
+                  <button type="button" onClick={addLabel} disabled={!newLabel.trim()}>Add</button>
+                </div>
+              </div>
+            </details>
             <label className="notes-metadata-input">
               <input
                 value={selectedNote.folder || ''}
@@ -527,6 +509,8 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
                 placeholder="Notebook / folder"
               />
             </label>
+          </div>
+          <div className="notes-template-tools">
             <select
               aria-label="Apply note template"
               value=""
@@ -536,10 +520,6 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
               {templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}
             </select>
             <button type="button" className="link-button" onClick={createTemplate}>Save as template</button>
-            <button type="button" className="notes-export-button" onClick={() => handleExport('text')}><Download size={15} /> TXT</button>
-            <button type="button" className="notes-export-button" onClick={() => handleExport('markdown')}><Download size={15} /> MD</button>
-            <button type="button" className="notes-export-button" onClick={() => handleExport('pdf')}><Download size={15} /> PDF</button>
-            <button type="button" className="notes-export-button" onClick={() => handleExport('clipboard')}><Clipboard size={15} /> Copy</button>
           </div>
           <input
             className="notes-title-input"
@@ -555,7 +535,6 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
               onChange={updateNote}
             />
           </Suspense>
-          {showSketch ? <Suspense fallback={<p role="status">Opening sketch pad…</p>}><SketchPad onSave={saveSketch} /></Suspense> : null}
           {(selectedNote.attachments || []).length ? (
             <section className="notes-attachments" aria-label="Note attachments">
               <h2>Attachments</h2>
@@ -592,6 +571,32 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
             }
           })()}
           <p className="notes-updated-label">Edited {formatUpdatedAt(selectedNote.updatedAt)}</p>
+          <div className="notes-editor-tools" role="group" aria-label="Note actions">
+            <input
+              ref={attachmentInputRef}
+              className="visually-hidden"
+              type="file"
+              accept="image/*,application/pdf,audio/*"
+              multiple
+              onChange={handleAttachmentSelect}
+              aria-label="Choose note attachments"
+            />
+            <button type="button" className="notes-tool-icon" onClick={() => attachmentInputRef.current?.click()} aria-label="Attach" title="Attach">
+              <Paperclip size={18} />
+            </button>
+            <button type="button" className="notes-tool-icon" onClick={() => setShowSketch(true)} aria-label="Sketch" title="Sketch">
+              <ImagePlus size={18} />
+            </button>
+            <button type="button" className={`notes-tool-icon ${isRecording ? 'active' : ''}`} onClick={toggleRecording} aria-label={isRecording ? 'Stop recording' : 'Record audio'} title={isRecording ? 'Stop recording' : 'Record audio'}>
+              <AudioLines size={18} />
+            </button>
+            <button type="button" className="notes-tool-icon" onClick={transcribeVoice} aria-label="Dictate" title="Dictate">
+              <Sparkles size={18} />
+            </button>
+            <button type="button" className="notes-tool-icon" onClick={() => setShowDownloadOptions(true)} aria-label="Download note" title="Download">
+              <Download size={18} />
+            </button>
+          </div>
           {showHistory ? (
             <section className="notes-history-panel" aria-label="Note revision history">
               <h2>Revision history</h2>
@@ -615,6 +620,17 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
           onCancel={() => setShowDeleteConfirm(false)}
           onConfirm={handleDelete}
         />
+        {showDownloadOptions ? (
+          <div className="notes-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowDownloadOptions(false); }}>
+            <section className="notes-download-dialog" role="dialog" aria-modal="true" aria-labelledby="notes-download-title">
+              <h2 id="notes-download-title">Download note</h2>
+              <p>Choose a format</p>
+              <button type="button" onClick={() => handleExport('text')}>Text (.txt)</button>
+              <button type="button" onClick={() => handleExport('pdf')}>PDF (.pdf)</button>
+              <button type="button" className="link-button" onClick={() => setShowDownloadOptions(false)}>Cancel</button>
+            </section>
+          </div>
+        ) : null}
       </main>
     );
   }
@@ -695,7 +711,7 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
       ) : visibleNotes.length ? (
         <section className={`notes-grid ${layout === 'list' ? 'notes-list-layout' : ''}`} aria-label={showTrash ? 'Trash' : showArchived ? 'Archived notes' : 'Your notes'}>
           {visibleNotes.map((note) => (
-            <article type="button" className={`note-card note-color-${note.color || 'default'}`} key={note.id}>
+            <article className={`note-card note-color-${note.color || 'default'}`} key={note.id}>
               <button
                 type="button"
                 className="note-card-open"
@@ -703,14 +719,35 @@ export function NotesScreen({ onBack, repository = notesRepository }) {
                 aria-label={`${showTrash ? 'View' : 'Open'} ${note.title || 'Untitled note'}`}
               >
               <span className="note-card-heading">
-                <strong>{note.emoji ? `${note.emoji} ` : ''}{note.title || 'Untitled'}</strong>
+                <strong>{note.title || 'Untitled'}</strong>
                 {note.pinned ? <Pin size={15} aria-label="Pinned" /> : null}
               </span>
               <span className="note-card-preview">{notePreview(note.body) || 'No additional text'}</span>
-              {(note.tags || []).length ? <span className="note-card-tags">{note.tags.map((tag) => `#${tag}`).join(' · ')}</span> : null}
+              {(note.tags || []).length ? <span className="note-card-tags">{note.tags.map((tag) => <span className={`note-card-tag note-label-${note.tagColors?.[tag] || 'green'}`} key={tag}>#{tag}</span>)}</span> : null}
               {note.folder ? <span className="note-card-folder">{note.folder}</span> : null}
               <span className="note-card-date">{formatUpdatedAt(note.updatedAt)}</span>
               </button>
+              {!showTrash ? (
+                <div className="note-card-color-menu">
+                  <button type="button" className="note-card-color-trigger" aria-label={`Change color for ${note.title || 'Untitled note'}`} onClick={() => setColorNoteId(colorNoteId === note.id ? null : note.id)}>
+                    <Palette size={16} />
+                  </button>
+                  {colorNoteId === note.id ? (
+                    <div className="note-card-color-popover" role="group" aria-label="Note card color">
+                      {noteColors.map((color) => (
+                        <button
+                          type="button"
+                          key={color}
+                          className={`notes-color-dot note-color-dot-${color} ${color === (note.color || 'default') ? 'selected' : ''}`}
+                          aria-label={`${color} note color`}
+                          aria-pressed={color === (note.color || 'default')}
+                          onClick={() => changeNoteColor(note, color)}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {showTrash ? <button type="button" className="link-button" onClick={() => handleRestore(note)}>Restore</button> : null}
             </article>
           ))}

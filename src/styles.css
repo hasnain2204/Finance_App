@@ -1598,6 +1598,7 @@ input[type="radio"] {
 }
 
 .note-card {
+  position: relative;
   display: grid;
   min-height: 124px;
   align-content: start;
@@ -1664,6 +1665,18 @@ input[type="radio"] {
   overflow-wrap: anywhere;
 }
 
+.note-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.note-card-tag {
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  font-size: 0.68rem;
+}
+
 .notes-layout-toggle {
   display: grid;
   width: 36px;
@@ -1673,7 +1686,6 @@ input[type="radio"] {
 }
 
 .notes-tag-filter,
-.notes-color-picker,
 .notes-metadata-input {
   display: flex;
   min-height: 38px;
@@ -1714,8 +1726,7 @@ input[type="radio"] {
   clip-path: inset(50%);
 }
 
-.notes-tag-filter select,
-.notes-color-picker select {
+.notes-tag-filter select {
   width: auto;
   min-height: 36px;
   padding: 0 28px 0 8px;
@@ -1728,35 +1739,135 @@ input[type="radio"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--color-outline);
+  gap: 6px;
+  padding: 8px 0 14px;
 }
 
-.notes-editor-tools > select {
+.notes-template-tools > select {
   width: auto;
   min-height: 36px;
   padding: 0 30px 0 10px;
   font-size: 0.78rem;
 }
 
-.notes-emoji-picker {
+.notes-metadata-row,
+.notes-template-tools {
   display: flex;
-  min-height: 36px;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
 }
 
-.notes-emoji-picker input {
-  width: 76px;
+.notes-metadata-row {
+  width: 100%;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.notes-label-menu {
+  position: relative;
+  flex: 0 1 44%;
+  min-width: 0;
+}
+
+.notes-label-menu summary {
+  display: flex;
+  max-width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  list-style: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-label-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.notes-label-popover,
+.note-card-color-popover {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  min-width: 220px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.notes-label-popover {
+  top: calc(100% + 6px);
+  left: 0;
+}
+
+.notes-label-list,
+.notes-label-color-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.notes-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 9px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+}
+
+.notes-label-chip button {
+  display: grid;
+  width: 20px;
+  min-height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: inherit;
+}
+
+.notes-add-label {
+  display: flex;
+  gap: 6px;
+}
+
+.notes-add-label input {
+  min-width: 0;
   min-height: 34px;
-  padding: 0 6px;
+  padding: 0 8px;
+}
+
+.notes-add-label button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.notes-add-label button:disabled {
+  opacity: 0.5;
+}
+
+.notes-template-tools {
+  min-height: 34px;
+  justify-content: flex-end;
   font-size: 0.76rem;
 }
 
 .notes-metadata-input {
-  min-width: min(100%, 210px);
-  flex: 1 1 160px;
+  min-width: 0;
+  flex: 1 1 0;
   min-height: 36px;
   padding: 0 8px;
   border: 1px solid var(--color-outline);
@@ -1780,7 +1891,6 @@ input[type="radio"] {
   flex-wrap: wrap;
   gap: 3px;
   padding: 6px 0;
-  border-bottom: 1px solid var(--color-outline);
   background: var(--color-background);
 }
 
@@ -1938,6 +2048,116 @@ input[type="radio"] {
   color: var(--color-primary);
 }
 
+.notes-tool-icon,
+.note-card-color-trigger {
+  display: grid;
+  width: 38px;
+  min-height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--color-primary-container) 55%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 70%, transparent);
+  opacity: 0.72;
+  transition: opacity var(--motion-fast) ease, background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.notes-tool-icon:hover,
+.notes-tool-icon:focus-visible,
+.notes-tool-icon.active,
+.note-card-color-trigger:hover,
+.note-card-color-trigger:focus-visible {
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+  opacity: 1;
+}
+
+.notes-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.notes-download-dialog {
+  display: grid;
+  width: min(100%, 360px);
+  gap: 10px;
+  padding: 22px;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-large);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.notes-download-dialog h2 {
+  font-size: 1.1rem;
+}
+
+.notes-download-dialog p {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.notes-download-dialog > button:not(.link-button) {
+  min-height: 42px;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  padding: 0 12px;
+}
+
+.note-card-color-menu {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+}
+
+.note-card-color-trigger {
+  width: 30px;
+  min-height: 30px;
+  opacity: 0.55;
+}
+
+.note-card-color-popover {
+  right: 0;
+  bottom: calc(100% + 6px);
+  grid-template-columns: repeat(6, 28px);
+  min-width: 0;
+  gap: 5px;
+}
+
+.notes-color-dot {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+}
+
+.notes-color-dot.selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.note-color-dot-default { background: var(--color-surface); border-color: var(--color-outline-strong); }
+.note-color-dot-green { background: #d7f0df; }
+.note-color-dot-blue { background: #d7e9fa; }
+.note-color-dot-yellow { background: #f9edc6; }
+.note-color-dot-pink { background: #f7dce5; }
+.note-color-dot-purple { background: #e8defa; }
+
+.note-label-green { background: #d7f0df; color: #245c3a; }
+.note-label-blue { background: #d7e9fa; color: #28527a; }
+.note-label-yellow { background: #f9edc6; color: #725b13; }
+.note-label-pink { background: #f7dce5; color: #7a354c; }
+.note-label-purple { background: #e8defa; color: #573c87; }
+
 .notes-sketch-panel {
   display: grid;
   gap: 8px;
@@ -1947,18 +2167,94 @@ input[type="radio"] {
   background: var(--color-surface);
 }
 
+.notes-sketch-page {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: max(10px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom));
+  background: var(--color-background);
+}
+
+.notes-sketch-header {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notes-sketch-header h1 {
+  flex: 1;
+  font-size: 1.1rem;
+}
+
+.notes-sketch-tools {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 4px 8px;
+}
+
+.notes-sketch-colors {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.notes-sketch-color {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--color-outline);
+}
+
+.notes-sketch-color.selected {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.notes-sketch-size-control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.notes-sketch-size-control input {
+  width: clamp(72px, 22vw, 140px);
+  min-height: 24px;
+  accent-color: var(--color-primary);
+}
+
+.notes-sketch-size-control output {
+  min-width: 30px;
+  color: var(--color-text);
+  text-align: right;
+}
+
 .notes-sketch-canvas {
   width: 100%;
-  height: 210px;
+  height: 100%;
+  min-height: 0;
   border: 1px dashed var(--color-outline-strong);
   border-radius: var(--radius-small);
   background: #ffffff;
   touch-action: none;
 }
 
-.notes-sketch-panel > div {
-  display: flex;
-  gap: 8px;
+.notes-sketch-hint {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  text-align: center;
 }
 
 .notes-attachments {
@@ -2083,6 +2379,7 @@ input[type="radio"] {
 .notes-title-input {
   min-height: 54px;
   padding: 4px 2px;
+  border-bottom: 1px solid var(--color-outline) !important;
   font-size: 1.45rem;
   font-weight: 700;
 }
