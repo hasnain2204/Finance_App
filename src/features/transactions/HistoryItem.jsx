@@ -28,6 +28,13 @@ export function HistoryItem({
   const descriptionPreview = isBudgetChange && entry.description
     ? entry.description.trim().replace(/\s+/g, ' ').split(' ').slice(0, 12).join(' ')
     : '';
+  const durationLabel = isBudgetChange && isBudgetAddition
+    ? (entry.periodType === 'custom_days' && entry.durationDays
+        ? `${entry.durationDays} days`
+        : entry.periodType === 'month'
+          ? 'Full month'
+          : null)
+    : null;
   const subtitle = isBudgetChange
     ? descriptionPreview || 'Budget updated'
     : (() => {
@@ -56,7 +63,10 @@ export function HistoryItem({
       </div>
       <div className="transaction-copy">
         <strong>{isBudgetChange ? title : categoryMap[entry.categoryId]?.name || 'Other'}</strong>
-        <span>{subtitle}</span>
+        <span>
+          {durationLabel ? <span className="budget-duration-badge">{durationLabel}</span> : null}
+          {subtitle}
+        </span>
       </div>
       <div className="transaction-meta align-right">
         <strong className={isBudgetChange ? 'budget-change-value' : 'expense'}>{amount}</strong>

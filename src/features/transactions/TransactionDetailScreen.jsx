@@ -61,6 +61,14 @@ export function TransactionDetailScreen({
             {isBudgetAddition ? (
               <>
                 <div>
+                  <span>Duration</span>
+                  <strong>
+                    {selectedTransaction.periodType === 'custom_days' && selectedTransaction.durationDays
+                      ? `${selectedTransaction.durationDays} days`
+                      : 'Full month'}
+                  </strong>
+                </div>
+                <div>
                   <span>Balance before</span>
                   <strong>{formatCurrency(fromPaisa(selectedTransaction.previousAmount || 0))}</strong>
                 </div>

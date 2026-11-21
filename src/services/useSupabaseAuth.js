@@ -119,6 +119,17 @@ const signUp = useCallback((email, password) => runAuthAction(
     'Signed in. Review the sync preview before any finance records are transferred.'
   ), [client, runAuthAction]);
 
+  const sendEmailVerificationLink = useCallback((email) => runAuthAction(
+    () => client.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        emailRedirectTo: window.location.origin,
+        shouldCreateUser: true
+      }
+    }),
+    `Verification link sent to ${email.trim()}. Open it to connect your account.`
+  ), [client, runAuthAction]);
+
   const signOut = useCallback(() => runAuthAction(
     () => client.auth.signOut(),
     'Signed out. Your local finance data remains available on this device.'
@@ -133,6 +144,7 @@ const signUp = useCallback((email, password) => runAuthAction(
     actionError: actionState.error,
     signUp,
     signIn,
+    sendEmailVerificationLink,
     signOut
   };
 }

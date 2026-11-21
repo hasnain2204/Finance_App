@@ -21,6 +21,7 @@ import {
 
 export const navItems = ['home', 'transactions', 'analytics', 'budget'];
 export const budgetCategories = ['Salary', 'Freelance', 'Other'];
+const onboardingNameDraftKey = 'pws-onboarding-name-draft';
 export const defaultBudgetTypes = [
   { id: 'bt-salary', name: 'Salary' },
   { id: 'bt-freelance', name: 'Freelance' },
@@ -49,7 +50,9 @@ export function useFinanceApp(repository = financeRepository) {
     date: getLocalDateString(),
     budgetCategory: 'Salary',
     amount: '',
-    description: ''
+    description: '',
+    periodType: 'month',
+    durationDays: ''
   });
   const [editingBudgetHistoryId, setEditingBudgetHistoryId] = useState(null);
   const [form, setForm] = useState(initialForm);
@@ -60,7 +63,9 @@ export function useFinanceApp(repository = financeRepository) {
   const [preferenceDateFormatDraft, setPreferenceDateFormatDraft] = useState('DD MMM YYYY');
   const [preferenceNotificationsDraft, setPreferenceNotificationsDraft] = useState(false);
   const [preferenceSaveStatus, setPreferenceSaveStatus] = useState({ type: 'idle', message: '' });
-  const [onboardingName, setOnboardingName] = useState('');
+  const [onboardingName, setOnboardingNameState] = useState(() => (
+    typeof window === 'undefined' ? '' : (window.localStorage.getItem(onboardingNameDraftKey) || '')
+  ));
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [editingTransactionId, setEditingTransactionId] = useState(null);
@@ -86,6 +91,11 @@ export function useFinanceApp(repository = financeRepository) {
   const [migrationReport, setMigrationReport] = useState(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [isPreparingRestore, setIsPreparingRestore] = useState(false);
+
+  const setOnboardingName = (name) => {
+    setOnboardingNameState(name);
+    window.localStorage.setItem(onboardingNameDraftKey, name);
+  };
   const fileInputRef = useRef(null);
   const budgetFormRef = useRef(null);
   const budgetAnalysisRef = useRef(null);
@@ -255,6 +265,7 @@ export function useFinanceApp(repository = financeRepository) {
         repository.savePreferences(nextPreferences),
         new Promise((resolve) => window.setTimeout(resolve, 1150))
       ]);
+      window.localStorage.removeItem(onboardingNameDraftKey);
       setPreferences(nextPreferences);
     } catch (error) {
       setStatus({ type: 'error', message: 'Could not save setup. Please try again.' });
@@ -365,7 +376,7 @@ export function useFinanceApp(repository = financeRepository) {
 
   const handleSaveBudget = async (event) => {
     event.preventDefault();
-    const { date, budgetCategory, amount, description } = budgetForm;
+    const { date, budgetCategory, amount, description, periodType = 'month', durationDays = '' } = budgetForm;
     const numericAmount = Number(amount);
     const parsedDate = new Date(`${date}T00:00:00`);
     const amountIsValid = (
@@ -386,6 +397,13 @@ export function useFinanceApp(repository = financeRepository) {
       return;
     }
 
+    const isCustomDays = periodType === 'custom_days';
+    const parsedDurationDays = isCustomDays ? Number(durationDays) : null;
+    if (isCustomDays && (!Number.isInteger(parsedDurationDays) || parsedDurationDays <= 0 || parsedDurationDays > 365)) {
+      setStatus({ type: 'error', message: 'Enter a valid number of days between 1 and 365.' });
+      return;
+    }
+
     const month = date.slice(0, 7);
     const paisaAmount = toPaisa(numericAmount);
     const timestamp = new Date();
@@ -397,6 +415,8 @@ export function useFinanceApp(repository = financeRepository) {
         date,
         amount: paisaAmount,
         description,
+        periodType: isCustomDays ? 'custom_days' : 'month',
+        durationDays: isCustomDays ? parsedDurationDays : null,
         timestamp
       });
       await loadData();
@@ -404,7 +424,14 @@ export function useFinanceApp(repository = financeRepository) {
       const defaultBudgetType = (preferences?.budgetTypes || budgetTypes).find(
         (b) => b.id === preferences?.defaultBudgetTypeId
       )?.name || budgetTypes[0]?.name || 'Salary';
-      setBudgetForm({ date: getLocalDateString(), budgetCategory: defaultBudgetType, amount: '', description: '' });
+      setBudgetForm({
+        date: getLocalDateString(),
+        budgetCategory: defaultBudgetType,
+        amount: '',
+        description: '',
+        periodType: 'month',
+        durationDays: ''
+      });
       setSelectedTransaction(null);
       setStatus({ type: 'success', message: 'Budget saved.' });
       setTab('budget');
@@ -422,7 +449,9 @@ export function useFinanceApp(repository = financeRepository) {
       date: getLocalDateString(),
       budgetCategory: defaultBudgetType,
       amount: '',
-      description: ''
+      description: '',
+      periodType: 'month',
+      durationDays: ''
     });
     setStatus({ type: 'idle', message: '' });
     setTab('add-budget');
@@ -434,7 +463,9 @@ export function useFinanceApp(repository = financeRepository) {
       date: entry.date,
       budgetCategory: entry.budgetCategory || 'Other',
       amount: entry.amount === null ? '' : String(fromPaisa(entry.amount)),
-      description: entry.description || ''
+      description: entry.description || '',
+      periodType: entry.periodType || 'month',
+      durationDays: entry.durationDays ? String(entry.durationDays) : ''
     });
     setStatus({ type: 'idle', message: '' });
     setTab('add-budget');

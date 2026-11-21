@@ -36,18 +36,74 @@ describe('AddBudgetScreen', () => {
     const amountInput = container.querySelector('#budget-amount');
     expect(amountInput.required).toBe(true);
 
-    // Verify 4 inline rows
+    // Verify 5 inline rows (Amount, Category, Date, Duration, Description)
     const rows = container.querySelectorAll('.transaction-form .form-inline-row');
-    expect(rows.length).toBe(4);
+    expect(rows.length).toBe(5);
 
     expect(rows[0].querySelector('label').textContent).toContain('Amount');
     expect(rows[1].querySelector('label').textContent).toContain('Category');
     expect(rows[2].querySelector('label').textContent).toContain('Date');
-    expect(rows[3].querySelector('label').textContent).toContain('Description');
+    expect(rows[3].querySelector('label').textContent).toContain('Duration');
+    expect(rows[4].querySelector('label').textContent).toContain('Description');
 
     // Verify submit button for new budget
     const submitBtn = container.querySelector('button[type="submit"]');
     expect(submitBtn.textContent).toBe('Save Budget');
+  });
+
+  it('handles duration toggle and custom days preset pills', () => {
+    const handleChange = vi.fn();
+
+    const { getByText, rerender, container } = render(
+      <AddBudgetScreen
+        budgetFormRef={{ current: null }}
+        editingBudgetHistoryId={null}
+        form={{ ...dummyBudgetForm, periodType: 'month' }}
+        budgetTypes={[{ id: 'bt-1', name: 'Salary' }]}
+        status={{ type: 'idle', message: '' }}
+        dateFormat="YYYY-MM-DD"
+        onBack={vi.fn()}
+        onChange={handleChange}
+        onSave={vi.fn()}
+      />
+    );
+
+    const fullMonthBtn = getByText('Full Month');
+    const customDaysBtn = getByText('Custom Days');
+    expect(fullMonthBtn.getAttribute('aria-checked')).toBe('true');
+    expect(customDaysBtn.getAttribute('aria-checked')).toBe('false');
+
+    // Click Custom Days
+    fireEvent.click(customDaysBtn);
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { name: 'periodType', value: 'custom_days' } })
+    );
+
+    // Re-render in custom_days mode
+    rerender(
+      <AddBudgetScreen
+        budgetFormRef={{ current: null }}
+        editingBudgetHistoryId={null}
+        form={{ ...dummyBudgetForm, periodType: 'custom_days', durationDays: '15' }}
+        budgetTypes={[{ id: 'bt-1', name: 'Salary' }]}
+        status={{ type: 'idle', message: '' }}
+        dateFormat="YYYY-MM-DD"
+        onBack={vi.fn()}
+        onChange={handleChange}
+        onSave={vi.fn()}
+      />
+    );
+
+    const daysInput = container.querySelector('#budget-duration-days');
+    expect(daysInput).not.toBeNull();
+    expect(daysInput.value).toBe('15');
+
+    // Click preset pill 7d
+    const pill7d = getByText('7d');
+    fireEvent.click(pill7d);
+    expect(handleChange).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { name: 'durationDays', value: '7' } })
+    );
   });
 
   it('renders Edit Budget title and Save Changes button when editing', () => {

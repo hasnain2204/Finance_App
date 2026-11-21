@@ -4,6 +4,7 @@ import {
   ChartNoAxesCombined,
   Ellipsis,
   House,
+  Lightbulb,
   Plus,
   WalletCards
 } from 'lucide-react';
@@ -30,6 +31,7 @@ import { RestoreDataScreen } from './features/settings/RestoreDataScreen';
 import { PaymentMethodsScreen } from './features/settings/PaymentMethodsScreen';
 import { BudgetTypesScreen } from './features/settings/BudgetTypesScreen';
 import { OnboardingScreen } from './features/settings/OnboardingScreen';
+import { NotesScreen } from './features/notes/NotesScreen';
 import { useCloudSync } from './services/CloudSyncContext';
 import { supabaseConfiguration } from './services/supabaseClient';
 
@@ -48,8 +50,10 @@ function App() {
     return Boolean(supabaseConfiguration?.isConfigured);
   });
   const content = <AppContent app={app} activateCloudRuntime={() => setCloudRuntimeActive(true)} />;
+  const shouldLoadCloudRuntime = cloudRuntimeActive ||
+    (!app.isLoading && app.preferences && !app.preferences.onboardingCompleted);
 
-  if (!cloudRuntimeActive) return content;
+  if (!shouldLoadCloudRuntime) return content;
 
   return (
     <Suspense fallback={content}>
@@ -213,9 +217,14 @@ function AppContent({ app, activateCloudRuntime }) {
         onboardingName={app.onboardingName}
         setOnboardingName={app.setOnboardingName}
         status={status}
+        auth={auth}
         onContinue={app.handleContinueOnboarding}
       />
     );
+  }
+
+  if (tab === 'notes') {
+    return <NotesScreen onBack={() => setTab('analytics')} />;
   }
 
   if (tab === 'add-transaction') {
@@ -485,6 +494,19 @@ function AppContent({ app, activateCloudRuntime }) {
               title="Budget analysis"
             >
               <ChartNoAxesCombined size={22} strokeWidth={1.9} />
+            </button>
+          </div>
+        ) : null}
+        {tab === 'analytics' ? (
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="more-button notes-topbar-button"
+              onClick={() => setTab('notes')}
+              aria-label="Open notes"
+              title="Notes"
+            >
+              <Lightbulb size={21} strokeWidth={1.9} />
             </button>
           </div>
         ) : null}

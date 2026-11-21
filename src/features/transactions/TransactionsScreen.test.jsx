@@ -38,4 +38,21 @@ describe('groupTransactionsByDateBuckets', () => {
     expect(groups.length).toBe(1);
     expect(groups[0].title).toBe('Last 24 Hours');
   });
+
+  it('groups a transaction by its selected date, not its creation time', () => {
+    const items = [
+      {
+        id: 'tx-backdated',
+        date: '2026-11-01',
+        createdAt: '2026-11-16T11:30:00Z',
+        amount: 100
+      }
+    ];
+
+    const groups = groupTransactionsByDateBuckets(items, baseNow);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].title).toBe('Last Month');
+    expect(groups[0].items.map((item) => item.id)).toEqual(['tx-backdated']);
+  });
 });

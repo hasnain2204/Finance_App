@@ -41,7 +41,8 @@ const stores = {
       ['id', 'id'], ['syncId', 'sync_id'], ['month', 'month'], ['categoryId', 'category_id'],
       ['categorySyncId', 'category_sync_id'], ['date', 'date'], ['createdAt', 'created_at'],
       ['previousAmount', 'previous_amount_paisa'], ['amount', 'amount_paisa'],
-      ['description', 'description'], ['budgetCategory', 'budget_category'], ['entryType', 'entry_type']
+      ['description', 'description'], ['budgetCategory', 'budget_category'], ['entryType', 'entry_type'],
+      ['periodType', 'period_type'], ['durationDays', 'duration_days']
     ]
   },
   preferences: {

@@ -81,6 +81,74 @@ export function AddBudgetScreen({
             </div>
           </div>
 
+          <div className="form-inline-row budget-duration-row">
+            <label className="form-inline-label">Duration</label>
+            <div className="form-inline-control">
+              <div className="budget-duration-toggle-group" role="radiogroup" aria-label="Budget Duration">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={form.periodType !== 'custom_days'}
+                  className={`budget-duration-toggle-btn ${form.periodType !== 'custom_days' ? 'active' : ''}`}
+                  onClick={() => onChange({ target: { name: 'periodType', value: 'month' } })}
+                >
+                  Full Month
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={form.periodType === 'custom_days'}
+                  className={`budget-duration-toggle-btn ${form.periodType === 'custom_days' ? 'active' : ''}`}
+                  onClick={() => {
+                    onChange({ target: { name: 'periodType', value: 'custom_days' } });
+                    if (!form.durationDays) {
+                      onChange({ target: { name: 'durationDays', value: '30' } });
+                    }
+                  }}
+                >
+                  Custom Days
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {form.periodType === 'custom_days' && (
+            <div className="form-inline-row budget-days-row">
+              <label htmlFor="budget-duration-days" className="form-inline-label">
+                Days <span className="required-star" aria-hidden="true">*</span>
+              </label>
+              <div className="form-inline-control">
+                <div className="budget-days-input-wrapper">
+                  <input
+                    id="budget-duration-days"
+                    name="durationDays"
+                    type="number"
+                    min="1"
+                    max="365"
+                    step="1"
+                    inputMode="numeric"
+                    placeholder="e.g. 15"
+                    value={form.durationDays || ''}
+                    onChange={onChange}
+                    required={form.periodType === 'custom_days'}
+                  />
+                  <div className="budget-days-preset-pills" role="group" aria-label="Quick day presets">
+                    {[7, 14, 30, 60].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`budget-preset-pill ${Number(form.durationDays) === preset ? 'active' : ''}`}
+                        onClick={() => onChange({ target: { name: 'durationDays', value: String(preset) } })}
+                      >
+                        {preset}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="form-inline-row">
             <label htmlFor="budget-description" className="form-inline-label">Description</label>
             <div className="form-inline-control">

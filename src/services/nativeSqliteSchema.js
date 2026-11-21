@@ -58,6 +58,8 @@ const schemaVersion1Statements = [
     description TEXT NOT NULL DEFAULT '',
     budget_category TEXT,
     entry_type TEXT,
+    period_type TEXT,
+    duration_days INTEGER,
     FOREIGN KEY (category_sync_id) REFERENCES categories(sync_id) ON UPDATE CASCADE ON DELETE RESTRICT
   );`,
   `CREATE TABLE IF NOT EXISTS preferences (

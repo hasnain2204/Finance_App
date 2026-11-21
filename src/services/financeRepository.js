@@ -204,7 +204,17 @@ export function createFinanceRepository(database, seed) {
       );
     },
 
-    async saveBudgetHistory({ id, month, budgetCategory, date, amount, description, timestamp = new Date() }) {
+    async saveBudgetHistory({
+      id,
+      month,
+      budgetCategory,
+      date,
+      amount,
+      description,
+      periodType = 'month',
+      durationDays = null,
+      timestamp = new Date()
+    }) {
       await database.transaction('rw', database.budgets, database.budgetHistory, database.categories,
         ...syncTransactionTables(database), async () => {
         const existingHistory = id ? await database.budgetHistory.get(id) : null;
@@ -273,6 +283,8 @@ export function createFinanceRepository(database, seed) {
               previousAmount: entryTotal,
               amount,
               description: description.trim(),
+              periodType: periodType || 'month',
+              durationDays: periodType === 'custom_days' ? (durationDays ? Number(durationDays) : null) : null,
               createdAt: timestamp.toISOString(),
               syncId: existingHistory.syncId || createSyncId(),
               entryType: 'addition'
@@ -281,6 +293,8 @@ export function createFinanceRepository(database, seed) {
               ...createBudgetHistoryEntry(month, 'overall', currentTotal, amount, description, date, timestamp),
               syncId: createSyncId(),
               budgetCategory,
+              periodType: periodType || 'month',
+              durationDays: periodType === 'custom_days' ? (durationDays ? Number(durationDays) : null) : null,
               entryType: 'addition'
             };
         const historyId = await database.budgetHistory[existingHistory ? 'put' : 'add'](historyEntry);

@@ -274,17 +274,20 @@ Allow users to start using PWS without complicated registration or unnecessary s
 
 - Display a welcome/setup experience on first launch.
 - Allow an optional user name.
+- Allow the user to optionally verify an email address using an emailed sign-in link.
 - Allow the user to enter an initial opening balance.
 - The opening balance must be optional.
 - If skipped, the opening balance defaults to zero.
 - Do not require account registration.
 - Do not require an internet connection.
+- Allow the user to continue to Home without verifying an email address.
 - Provide a clear Continue to Home action.
 - Initialize the local application data where required.
 
 ### Acceptance criteria
 
 - A new user can reach Home without creating an account.
+- Email verification is optional; a user can continue while offline or while an email link is pending.
 - Skipping the optional name does not prevent application usage.
 - Skipping the opening balance initializes it to zero.
 - Entering an opening balance initializes the user's financial position correctly.
@@ -558,6 +561,9 @@ Help users understand their financial activity over time.
 - Display spending information through clear visualizations.
 - Support weekly and monthly reporting periods.
 - Keep opening balance separate from income analytics.
+- Provide an entry point to personal notes from Analytics.
+- Let users create, search, edit, pin, archive, and delete notes stored on the device.
+- Keep personal notes separate from financial records and Cloud Sync.
 
 ### Acceptance criteria
 
@@ -567,6 +573,7 @@ Help users understand their financial activity over time.
 - Opening balance does not inflate income totals.
 - Empty analytics states are displayed when no relevant records exist.
 - Analytics update after transaction changes.
+- Opening a note displays its editable content, and note changes persist between app launches on the same device.
 
 ---
 

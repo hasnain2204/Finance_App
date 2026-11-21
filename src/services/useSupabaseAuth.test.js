@@ -14,6 +14,7 @@ function createAuthClient(initialSession = null) {
       }),
       getSession: vi.fn(async () => ({ data: { session: initialSession }, error: null })),
       signUp: vi.fn(async () => ({ data: { user: { id: 'new-user' }, session: null }, error: null })),
+      signInWithOtp: vi.fn(async () => ({ data: { user: null, session: null }, error: null })),
       signInWithPassword: vi.fn(async () => ({
         data: { user: { id: 'signed-in-user' }, session: { user: { id: 'signed-in-user' } } },
         error: null
@@ -90,6 +91,16 @@ describe('Supabase authentication session handling', () => {
       }
     });
     expect(result.current.message).toContain('Check user@example.com');
+
+    await act(async () => result.current.sendEmailVerificationLink(' gmail@example.com '));
+    expect(client.auth.signInWithOtp).toHaveBeenCalledWith({
+      email: 'gmail@example.com',
+      options: {
+        emailRedirectTo: window.location.origin,
+        shouldCreateUser: true
+      }
+    });
+    expect(result.current.message).toContain('Verification link sent to gmail@example.com');
 
     await act(async () => result.current.signIn('user@example.com', 'a-secure-password'));
     expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'user@example.com', password: 'a-secure-password' });

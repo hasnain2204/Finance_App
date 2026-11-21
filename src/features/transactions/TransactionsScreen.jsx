@@ -20,16 +20,16 @@ export function groupTransactionsByDateBuckets(items, now = new Date()) {
 
   for (const entry of items) {
     let entryDateMs = null;
-    if (entry.createdAt) {
-      const parsed = new Date(entry.createdAt).getTime();
-      if (!isNaN(parsed)) entryDateMs = parsed;
-    }
-    if (!entryDateMs && entry.date) {
+    if (entry.date) {
       const parsed = new Date(`${entry.date}T12:00:00`).getTime();
       if (!isNaN(parsed)) entryDateMs = parsed;
     }
+    if (entryDateMs === null && entry.createdAt) {
+      const parsed = new Date(entry.createdAt).getTime();
+      if (!isNaN(parsed)) entryDateMs = parsed;
+    }
 
-    if (!entryDateMs) {
+    if (entryDateMs === null) {
       buckets.older.push(entry);
       continue;
     }
